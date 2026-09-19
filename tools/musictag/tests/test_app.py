@@ -1,0 +1,310 @@
+"""musictag_app.py 테스트. 네트워크와 yt-dlp는 전부 mock."""
+from __future__ import annotations
+
+import base64
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+import musictag as core
+import musictag_app as app
+from conftest import imported_modules, silent_m4a_bytes, used_names
+
+JPEG = b"\xff\xd8\xff" + b"\x00" * 64
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+SAMPLE = {"trackName": "Song", "artistName": "Artist", "collectionName": "Album",
+          "releaseDate": "2021-03-04T12:00:00Z", "primaryGenreName": "J-Pop",
+          "trackNumber": 7, "trackCount": 12, "artworkUrl100": "https://x/y/100x100bb.jpg"}
+
+
+@pytest.fixture()
+def api(tmp_path):
+    return app.Api(docs=tmp_path, out_dir=tmp_path / "music")
+
+
+def wait(api_obj, jid, timeout=5.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        state = api_obj.job(jid)["state"]
+        if state != "working":
+            return state
+        time.sleep(0.02)
+    raise AssertionError("작업이 끝나지 않음")
+
+
+def fake_download(tmp_path):
+    def _dl(url):
+        tmp = tmp_path / "tmpaudio.m4a"
+        tmp.write_bytes(silent_m4a_bytes())
+        return tmp, {"title": "[MV] Artist - Song (Official)", "uploader": "Chan", "id": "VID123"}
+    return _dl
+
+
+# ------------------------------------------------------------ 접속 키
+def test_get_key_is_created_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "KEY_FILE", tmp_path / ".musictag_key")
+    first = app.get_key()
+    assert first and app.get_key() == first
+
+
+# ------------------------------------------------------------ 다운로드 작업
+def test_start_rejects_empty_url(api):
+    assert "error" in api.start({"url": "   "})
+
+
+def test_start_cleans_url_before_download(api, tmp_path, monkeypatch):
+    seen = []
+
+    def _dl(url):
+        seen.append(url)
+        return fake_download(tmp_path)(url)
+
+    monkeypatch.setattr(core, "download", _dl)
+    monkeypatch.setattr(core, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    jid = api.start({"url": "“https://youtu.be/VID123?si=x”"})["job"]
+    assert wait(api, jid) == "ready"
+    assert seen == ["https://youtu.be/VID123"]
+
+
+def test_job_returns_candidates_and_blank(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "download", fake_download(tmp_path))
+    monkeypatch.setattr(core, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    jid = api.start({"url": "https://youtu.be/VID123"})["job"]
+    assert wait(api, jid) == "ready"
+    data = api.job(jid)
+    assert data["video"] == {"title": "[MV] Artist - Song (Official)",
+                             "uploader": "Chan", "id": "VID123"}
+    assert data["query"] == "Artist Song"
+    cand = data["candidates"][0]
+    assert cand["title"] == "Song" and cand["art"].endswith("300x300bb.jpg")
+    assert data["blank"]["title"] == "[MV] Artist - Song (Official)"
+
+
+def test_job_reports_download_failure_in_korean(api, monkeypatch):
+    def boom(url):
+        core.die("다운로드에 실패했습니다.", "링크를 다시 확인하세요.")
+
+    monkeypatch.setattr(core, "download", boom)
+    jid = api.start({"url": "https://youtu.be/BAD"})["job"]
+    assert wait(api, jid) == "error"
+    assert any("오류" in line for line in api.job(jid)["log"])
+
+
+def test_unknown_job(api):
+    assert "error" in api.job("nope")
+
+
+def test_search_requires_query(api):
+    assert "error" in api.search({"query": "  "})
+
+
+def test_search_passes_country_order(api, monkeypatch):
+    seen = {}
+
+    def fake(term, countries=None, limit=5):
+        seen["countries"] = countries
+        return [SAMPLE], "KR"
+
+    monkeypatch.setattr(core, "itunes_search", fake)
+    out = api.search({"query": "abc", "countries": ["KR", "US"]})
+    assert seen["countries"] == ["KR", "US"] and out["candidates"][0]["country"] == "KR"
+
+
+# ------------------------------------------------------------ 커버 선택
+def test_cover_upload_accepts_jpeg_and_png(api):
+    for raw, kind in ((JPEG, "jpeg"), (PNG, "png")):
+        payload = {"mode": "upload", "data": "data:image/x;base64," + base64.b64encode(raw).decode()}
+        cover, warn = api._cover(payload, {}, "")
+        assert cover == (raw, kind) and warn == ""
+
+
+def test_cover_upload_rejects_webp(api):
+    raw = base64.b64encode(b"RIFF1234WEBPVP8 ").decode()
+    cover, warn = api._cover({"mode": "upload", "data": raw}, {}, "")
+    assert cover is None and "JPEG" in warn
+
+
+def test_cover_upload_rejects_broken_base64(api):
+    cover, warn = api._cover({"mode": "upload", "data": "!!!not base64!!!"}, {}, "")
+    assert cover is None and warn
+
+
+def test_cover_none(api):
+    assert api._cover({"mode": "none"}, {"artwork": "https://x/100x100bb.jpg"}, "V") == (None, "")
+
+
+def test_cover_itunes_ignores_local_cover_file(api, tmp_path, monkeypatch):
+    """앱에서는 '앨범 아트'를 고르면 남아 있는 cover.jpg가 끼어들면 안 된다."""
+    (tmp_path / "cover.jpg").write_bytes(JPEG)
+    monkeypatch.setattr(core, "http_get", lambda url: PNG)
+    cover, _ = api._cover({"mode": "itunes"}, {"artwork": "https://x/y/100x100bb.jpg"}, "V")
+    assert cover == (PNG, "png")
+
+
+def test_cover_youtube_uses_thumbnail(api, monkeypatch):
+    seen = []
+    monkeypatch.setattr(core, "http_get", lambda url: (seen.append(url), JPEG)[1])
+    cover, _ = api._cover({"mode": "youtube"}, {"artwork": "https://x/y/100x100bb.jpg"}, "VID")
+    assert cover == (JPEG, "jpeg")
+    assert seen == ["https://i.ytimg.com/vi/VID/maxresdefault.jpg"]
+
+
+# ------------------------------------------------------------ 저장 / 보관함
+def _saved(api_obj, tmp_path, monkeypatch, **over):
+    monkeypatch.setattr(core, "download", fake_download(tmp_path))
+    monkeypatch.setattr(core, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    jid = api_obj.start({"url": "https://youtu.be/VID123"})["job"]
+    wait(api_obj, jid)
+    meta = dict(api_obj.job(jid)["candidates"][0])
+    meta.update(over)
+    return api_obj.save({"job": jid, "meta": meta, "lyrics": "한줄 ​\n둘 ",
+                         "cover": {"mode": "upload",
+                                   "data": base64.b64encode(JPEG).decode()}})
+
+
+def test_save_writes_tags_and_filename(api, tmp_path, monkeypatch):
+    out = _saved(api, tmp_path, monkeypatch)
+    assert out["name"] == "Artist_-_Song.m4a"
+    saved = api.out_dir / out["name"]
+    tags = core.read_tags(saved)
+    assert tags["title"] == "Song" and tags["artist"] == "Artist"
+    assert tags["track"] == "7" and tags["track_total"] == "12"
+    assert tags["lyrics"] == "한줄\n둘" and tags["has_cover"] is True
+    assert not (tmp_path / "tmpaudio.m4a").exists()
+
+
+def test_save_sanitizes_filename(api, tmp_path, monkeypatch):
+    out = _saved(api, tmp_path, monkeypatch, artist="A/B", title="X: Y")
+    assert out["name"] == "A_B_-_X_Y.m4a"
+
+
+def test_save_without_job(api):
+    assert "error" in api.save({"job": "nope", "meta": {}})
+
+
+def test_library_track_update_remove(api, tmp_path, monkeypatch):
+    name = _saved(api, tmp_path, monkeypatch)["name"]
+
+    items = api.library()["items"]
+    assert len(items) == 1 and items[0]["title"] == "Song" and items[0]["cover"] is True
+
+    track = api.track(name)
+    assert track["meta"]["album"] == "Album" and "has_cover" not in track["meta"]
+
+    meta = dict(track["meta"], title="새제목", artist="새가수")
+    out = api.update({"name": name, "meta": meta, "lyrics": "", "rename": True})
+    assert out["name"] == "새가수_-_새제목.m4a"
+    assert core.read_tags(api.out_dir / out["name"])["lyrics"] == ""
+
+    assert api.art(out["name"]) == JPEG
+    assert api.remove({"name": out["name"]}) == {"ok": True}
+    assert api.library()["items"] == []
+
+
+def test_update_keeps_cover_when_not_touched(api, tmp_path, monkeypatch):
+    name = _saved(api, tmp_path, monkeypatch)["name"]
+    api.update({"name": name, "meta": api.track(name)["meta"], "lyrics": "x"})
+    assert core.read_tags(api.out_dir / name)["has_cover"] is True
+
+
+def test_missing_file_errors(api):
+    assert "error" in api.track("nope.m4a")
+    assert "error" in api.update({"name": "nope.m4a", "meta": {}})
+    assert "error" in api.remove({"name": "nope.m4a"})
+    assert api.art("nope.m4a") is None
+
+
+def test_path_traversal_is_blocked(api, tmp_path):
+    (tmp_path / "secret.m4a").write_bytes(silent_m4a_bytes())
+    assert "error" in api.track("../secret.m4a")
+
+
+# ------------------------------------------------------------ 아이콘 / HTTP
+def test_app_icon_is_png():
+    data = app.app_icon(32)
+    assert core.image_kind(data) == "png" and len(data) > 60
+
+
+@pytest.fixture()
+def server(tmp_path, monkeypatch):
+    from http.server import ThreadingHTTPServer
+
+    class H(app.Handler):
+        pass
+
+    H.api, H.key = app.Api(docs=tmp_path, out_dir=tmp_path / "music"), "testkey"
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}", H.api
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def fetch(url):
+    with urllib.request.urlopen(url, timeout=5) as resp:
+        return resp.status, resp.read(), resp.headers.get("Content-Type", "")
+
+
+def test_http_page_requires_key(server):
+    base, _ = server
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        fetch(base + "/")
+    assert exc.value.code == 403
+
+
+def test_http_api_requires_key(server):
+    base, _ = server
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        fetch(base + "/api/library?k=wrong")
+    assert exc.value.code == 403
+
+
+def test_http_serves_page_and_icon(server):
+    base, _ = server
+    status, body, ctype = fetch(base + "/?k=testkey")
+    assert status == 200 and b"musictag" in body and "text/html" in ctype
+    status, body, ctype = fetch(base + "/icon.png")
+    assert status == 200 and core.image_kind(body) == "png"
+
+
+def test_http_library_and_post(server, tmp_path, monkeypatch):
+    base, _ = server
+    status, body, _ = fetch(base + "/api/library?k=testkey")
+    assert status == 200 and json.loads(body) == {"items": []}
+    req = urllib.request.Request(base + "/api/start?k=testkey",
+                                 data=json.dumps({"url": ""}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert "error" in json.loads(resp.read())
+
+
+def test_http_unknown_route(server):
+    base, _ = server
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        fetch(base + "/api/nope?k=testkey")
+    assert exc.value.code == 404
+
+
+# ------------------------------------------------------------ a-Shell 제약
+def test_app_source_has_no_subprocess_or_shell_calls():
+    source = Path(app.__file__).read_text(encoding="utf-8")
+    banned = ("subprocess", "os.system", "os.popen", "os.spawn", "pty.spawn")
+    for name in used_names(source):
+        assert not name.startswith(banned), f"{name} 사용 금지"
+    allowed = {"base64", "json", "re", "secrets", "struct", "sys", "threading", "zlib",
+               "urllib", "http", "pathlib", "__future__", "musictag", "mutagen"}
+    extra = imported_modules(source) - allowed
+    assert not extra, f"허용되지 않은 import: {extra}"
+
+
+def test_page_has_no_external_resources():
+    """오프라인에서도 열려야 하므로 CDN/외부 폰트를 쓰지 않는다."""
+    page = app.PAGE
+    for bad in ("cdn.", "googleapis", "unpkg", "jsdelivr", "<script src", "@import"):
+        assert bad not in page, f"외부 리소스 금지: {bad}"

@@ -6,6 +6,7 @@
 - `subprocess` / `os.system` / 셸 호출 없음 (a-Shell에서 불안정)
 - ffmpeg 후처리 없음 — `bestaudio[ext=m4a]` 원본을 그대로 저장
 - 컴파일이 필요한 패키지(Pillow 등) 사용 안 함
+- 터미널이 싫으면 **앱 모드**(`musictag_app.py`) — Safari로 열고 홈 화면에 추가
 
 ## 1. 설치
 
@@ -15,7 +16,16 @@ a-Shell을 열고 아래를 차례대로 입력합니다.
 pip install -U yt-dlp mutagen
 ```
 
-`musictag.py`를 `~/Documents`에 둡니다. 방법은 둘 중 하나입니다.
+`musictag.py`(필수)와 `musictag_app.py`(앱 모드용)를 `~/Documents`에 둡니다.
+a-Shell에서 바로 받는 것이 가장 쉽습니다.
+
+```bash
+cd ~/Documents
+curl -O https://raw.githubusercontent.com/leesechn/shuohao-skills/claude/ipad-ashell-music-tagger-o2ewbw/tools/musictag/musictag.py
+curl -O https://raw.githubusercontent.com/leesechn/shuohao-skills/claude/ipad-ashell-music-tagger-o2ewbw/tools/musictag/musictag_app.py
+```
+
+직접 옮기려면 둘 중 하나입니다.
 
 - **파일 앱**: `musictag.py`를 "나의 iPad → a-Shell" 폴더에 복사
 - **a-Shell 안에서 직접 작성**:
@@ -34,7 +44,49 @@ cd ~/Documents
 python3 musictag.py show 아무파일.m4a
 ```
 
-## 2. 사용법
+## 2. 앱으로 쓰기 (권장)
+
+터미널 입력이 번거로우면 **웹 앱 모드**를 쓰세요. a-Shell이 iPad 안에서 로컬 서버를 띄우고,
+Safari가 그 화면을 보여줍니다. 홈 화면에 추가하면 아이콘·전체화면까지 앱처럼 동작합니다.
+
+```bash
+cd ~/Documents
+python3 musictag_app.py
+```
+
+실행하면 아래 같은 주소가 나옵니다. **`?k=...`까지 통째로** 복사하세요.
+
+```text
+http://127.0.0.1:8080/?k=Xk3nQ8vTb2wQ
+```
+
+1. Safari 주소창에 붙여넣고 이동
+2. 공유 버튼 → **홈 화면에 추가** → 이름을 `musictag`로
+3. 다음부터는 홈 화면 아이콘만 누르면 됩니다
+
+화면에서 할 수 있는 것:
+
+| 탭 | 하는 일 |
+| --- | --- |
+| **추가** | 링크 붙여넣기 → 곡 후보 선택 → 정보·가사·커버 확인 → 저장 |
+| **보관함** | 저장한 곡 목록, 태그 수정, 커버 교체, 삭제 |
+
+커버는 **앨범 아트 / 유튜브 썸네일 / 사진 앱에서 고르기 / 없음** 중에서 탭으로 고릅니다.
+가사는 직접 준비한 텍스트를 붙여넣는 칸이 있습니다(자동 검색 기능은 없습니다).
+
+### 앱 모드에서 꼭 알아야 할 것
+
+- **a-Shell을 닫으면 서버도 멈춥니다.** Safari와 a-Shell을 **Split View**로 나란히 두세요.
+  a-Shell이 백그라운드로 완전히 내려가면 iOS가 프로세스를 정지시켜 화면이 멈춥니다.
+- 주소의 `?k=...`는 **접속 키**입니다. 같은 기기의 다른 앱이 서버를 건드리지 못하게 막습니다.
+  키는 `~/Documents/.musictag_key`에 저장되며 바꾸고 싶으면 그 파일을 지우면 새로 만들어집니다.
+- 서버는 `127.0.0.1`에만 묶여 있어 같은 와이파이의 다른 기기에서는 접속되지 않습니다.
+- 포트가 겹치면 `python3 musictag_app.py --port 8081`.
+
+명령줄 방식(`python3 musictag.py`)도 그대로 씁니다. 둘은 같은 로직을 공유합니다.
+
+
+## 3. 명령줄로 쓰기
 
 ### 다운로드 + 태깅 (기본)
 
@@ -71,7 +123,7 @@ python3 musictag.py show "music/Artist_-_Song.m4a"   # 태그 요약만 출력
 python3 musictag.py --country KR,US
 ```
 
-## 3. 커버와 가사 넣는 법
+## 4. 커버와 가사 넣는 법
 
 ### 커버 (우선순위 순)
 
@@ -91,7 +143,7 @@ python3 musictag.py --country KR,US
 들어가는 사고를 막기 위한 장치입니다. 가사를 인터넷에서 검색해 오는 기능은 **없습니다.**
 직접 준비한 파일만 사용합니다.
 
-## 4. 저장되는 파일 이름
+## 5. 저장되는 파일 이름
 
 `아티스트 - 제목.m4a` 형태를 iPad 파일 앱에 맞게 정리합니다.
 
@@ -102,7 +154,7 @@ python3 musictag.py --country KR,US
 
 예: `Artist / Name` + `Song: Part 1` → `Artist_Name_-_Song_Part_1.m4a`
 
-## 5. 자주 나는 오류 3가지
+## 6. 자주 나는 오류 3가지
 
 ### ① `오류: yt-dlp를 불러오지 못했습니다.`
 
@@ -141,11 +193,13 @@ pip install -U yt-dlp
 `~/Documents/musictagtmp/`에 `tmpaudio.webm` 같은 파일이 남아 있으면 m4a를 못 받은 것이
 맞습니다. 그 파일은 지워도 됩니다.
 
-## 6. 폴더 구조
+## 7. 폴더 구조
 
 ```text
 ~/Documents/
 ├── musictag.py
+├── musictag_app.py    (앱 모드)
+├── .musictag_key      앱 접속 키 (자동 생성)
 ├── cover.jpg          (선택) 직접 넣을 커버
 ├── lyrics.txt         (선택) 직접 넣을 가사 → 사용 후 lyrics_used.txt
 ├── musictagtmp/       임시 폴더 (자동 정리)
@@ -153,7 +207,7 @@ pip install -U yt-dlp
     └── Artist_-_Song.m4a
 ```
 
-## 7. 개발자용: 테스트
+## 8. 개발자용: 테스트
 
 실제 다운로드와 iTunes 호출은 전부 mock 처리되어 있습니다. 네트워크 없이 돌아갑니다.
 

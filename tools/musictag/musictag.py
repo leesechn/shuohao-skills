@@ -167,10 +167,10 @@ def image_kind(data):
         return "webp"
     return ""
 
-def get_cover(meta, video_id="", docs=None):
+def get_cover(meta, video_id="", docs=None, local=True):
     """1) 로컬 cover 파일 2) iTunes 600x600 3) 유튜브 썸네일 순."""
     docs = docs or DOCS
-    for name in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp"):
+    for name in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp") if local else ():
         path = docs / name
         if not path.exists():
             continue

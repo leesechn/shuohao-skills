@@ -1,6 +1,7 @@
 """테스트 픽스처: ffmpeg 없이 만든 아주 짧은 무음 m4a."""
 from __future__ import annotations
 
+import ast
 import struct
 import sys
 from pathlib import Path
@@ -53,3 +54,28 @@ def silent_m4a(tmp_path: Path) -> Path:
     path = tmp_path / "silent.m4a"
     path.write_bytes(silent_m4a_bytes())
     return path
+
+
+def _dotted(node) -> str:
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+def used_names(source: str) -> set[str]:
+    """코드에서 실제로 참조한 이름들(주석·독스트링 제외)."""
+    tree = ast.parse(source)
+    return {n for n in (_dotted(x) for x in ast.walk(tree)) if n}
+
+
+def imported_modules(source: str) -> set[str]:
+    tree = ast.parse(source)
+    mods = {n.names[0].name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)}
+    mods |= {(n.module or "").split(".")[0] for n in ast.walk(tree)
+             if isinstance(n, ast.ImportFrom)}
+    return mods

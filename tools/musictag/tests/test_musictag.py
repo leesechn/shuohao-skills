@@ -1,7 +1,6 @@
 """musictag.py 테스트. 실제 유튜브 다운로드와 iTunes 호출은 전부 mock."""
 from __future__ import annotations
 
-import ast
 import json
 from pathlib import Path
 
@@ -9,6 +8,7 @@ import pytest
 from mutagen.mp4 import MP4
 
 import musictag as m
+from conftest import imported_modules, used_names
 
 SRC = Path(m.__file__)
 
@@ -174,6 +174,14 @@ def test_get_cover_returns_none_when_nothing_found(tmp_path):
     assert m.get_cover({}, "", docs=tmp_path) == (None, "")
 
 
+def test_get_cover_local_false_skips_local_files(tmp_path, monkeypatch):
+    (tmp_path / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 8)
+    monkeypatch.setattr(m, "http_get", lambda url: b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    data, kind = m.get_cover({"artwork": "https://x/y/100x100bb.jpg"}, "",
+                             docs=tmp_path, local=False)
+    assert kind == "png"
+
+
 def test_take_lyrics_reads_cleans_and_renames(tmp_path):
     (tmp_path / "lyrics.txt").write_text("한줄 ​ \n둘째줄  \n", encoding="utf-8")
     assert m.take_lyrics(docs=tmp_path) == "한줄\n둘째줄"
@@ -250,15 +258,11 @@ def test_main_show_requires_filename(capsys):
 def test_source_has_no_subprocess_or_shell_calls():
     """a-Shell에서 불안정하므로 subprocess/os.system 호출이 없어야 한다."""
     source = SRC.read_text(encoding="utf-8")
-    banned = ("subprocess", "os.system", "os.popen", "os.spawn", "os.exec",
-              "pty.spawn", "commands.getoutput")
-    for word in banned:
-        assert word not in source, f"{word} 사용 금지"
-    tree = ast.parse(source)
-    imported = {n.names[0].name.split(".")[0] for n in ast.walk(tree)
-                if isinstance(n, ast.Import)}
-    imported |= {(n.module or "").split(".")[0] for n in ast.walk(tree)
-                 if isinstance(n, ast.ImportFrom)}
+    banned = ("subprocess", "os.system", "os.popen", "os.spawn", "os.exec", "pty.spawn")
+    used = used_names(source)
+    for name in used:
+        assert not name.startswith(banned), f"{name} 사용 금지"
     allowed = {"json", "re", "sys", "unicodedata", "urllib", "pathlib",
                "__future__", "traceback", "mutagen", "yt_dlp"}
-    assert imported <= allowed, f"허용되지 않은 import: {imported - allowed}"
+    extra = imported_modules(source) - allowed
+    assert not extra, f"허용되지 않은 import: {extra}"
