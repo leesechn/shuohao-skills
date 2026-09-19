@@ -224,6 +224,29 @@ def test_path_traversal_is_blocked(api, tmp_path):
     assert "error" in api.track("../secret.m4a")
 
 
+# ------------------------------------------------------------ 실행 옵션
+@pytest.mark.parametrize(("args", "want"), [
+    ([], (8080, "127.0.0.1")),
+    (["--port", "9000"], (9000, "127.0.0.1")),
+    (["--port", "abc"], (8080, "127.0.0.1")),
+    (["--lan"], (8080, "0.0.0.0")),
+    (["--host", "192.168.0.5"], (8080, "192.168.0.5")),
+    (["--lan", "--port", "8081"], (8081, "0.0.0.0")),
+    (["--host"], (8080, "127.0.0.1")),
+])
+def test_parse_args(args, want):
+    assert app.parse_args(args) == want
+
+
+def test_default_bind_is_loopback_only():
+    """옵션을 주지 않으면 이 기기 밖에서는 접속되지 않아야 한다."""
+    assert app.parse_args([])[1] == "127.0.0.1"
+
+
+def test_lan_ip_returns_string():
+    assert isinstance(app.lan_ip(), str)
+
+
 # ------------------------------------------------------------ 아이콘 / HTTP
 def test_app_icon_is_png():
     data = app.app_icon(32)
@@ -297,8 +320,8 @@ def test_app_source_has_no_subprocess_or_shell_calls():
     banned = ("subprocess", "os.system", "os.popen", "os.spawn", "pty.spawn")
     for name in used_names(source):
         assert not name.startswith(banned), f"{name} 사용 금지"
-    allowed = {"base64", "json", "re", "secrets", "struct", "sys", "threading", "zlib",
-               "urllib", "http", "pathlib", "__future__", "musictag", "mutagen"}
+    allowed = {"base64", "json", "re", "secrets", "socket", "struct", "sys", "threading",
+               "zlib", "urllib", "http", "pathlib", "__future__", "musictag", "mutagen"}
     extra = imported_modules(source) - allowed
     assert not extra, f"허용되지 않은 import: {extra}"
 

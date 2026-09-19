@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """musictag_app.py - musictag.py의 웹 UI (a-Shell 로컬 서버).
 
-  python3 musictag_app.py            # http://127.0.0.1:8080 에서 실행
+  python3 musictag_app.py            # http://127.0.0.1:8080 (이 기기에서만)
   python3 musictag_app.py --port 9000
+  python3 musictag_app.py --lan      # 같은 와이파이의 다른 기기에서도 접속
 
 Safari로 열고 '공유 -> 홈 화면에 추가'를 하면 앱처럼 씁니다.
 subprocess/셸 호출 없이 표준 라이브러리 http.server만 사용합니다.
@@ -13,6 +14,7 @@ import base64
 import json
 import re
 import secrets
+import socket
 import struct
 import sys
 import threading
@@ -337,15 +339,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "요청을 처리하지 못했습니다.", "detail": str(exc)}, 500)
 
 
+def lan_ip() -> str:
+    """이 기기가 같은 와이파이에서 갖는 주소. 패킷은 실제로 나가지 않는다."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 9))  # TEST-NET-1, 라우팅만 확인
+        return sock.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+
+
 def serve(port=8080, host="127.0.0.1"):
     Handler.api, Handler.key = Api(), get_key()
     core.OUT_DIR.mkdir(parents=True, exist_ok=True)
     httpd = ThreadingHTTPServer((host, port), Handler)
-    url = f"http://{host}:{port}/?k={Handler.key}"
-    print("musictag 앱이 열렸습니다. Safari 주소창에 아래 주소를 붙여넣으세요.\n")
-    print("   " + url + "\n")
+    shared = host not in ("127.0.0.1", "localhost")
+    shown = (lan_ip() or host) if shared else host
+    print("musictag 앱이 열렸습니다. 브라우저 주소창에 아래 주소를 붙여넣으세요.\n")
+    print(f"   http://{shown}:{port}/?k={Handler.key}\n")
     print("'공유 → 홈 화면에 추가'를 하면 앱처럼 쓸 수 있습니다.")
-    print("a-Shell을 닫으면 서버도 멈춥니다. Split View로 Safari와 함께 두세요.")
+    if shared:
+        print("\n[주의] 같은 와이파이의 다른 기기에서도 접속됩니다.")
+        print("       암호화되지 않은 http이니 공용 와이파이에서는 쓰지 마세요.")
+        print("       주소 끝의 ?k= 키를 아는 기기만 들어올 수 있습니다.")
+    print("\na-Shell을 닫으면 서버도 멈춥니다. Split View로 브라우저와 함께 두세요.")
     print("종료: Ctrl+C\n")
     try:
         httpd.serve_forever()
@@ -355,15 +374,27 @@ def serve(port=8080, host="127.0.0.1"):
         httpd.server_close()
 
 
-def main(argv=None):
-    args = list(sys.argv[1:] if argv is None else argv)
-    port = 8080
+def parse_args(args):
+    """--port / --host / --lan 만 받는다."""
+    port, host = 8080, "127.0.0.1"
     if "--port" in args:
         i = args.index("--port")
         if i + 1 < len(args) and args[i + 1].isdigit():
             port = int(args[i + 1])
+    if "--host" in args:
+        i = args.index("--host")
+        if i + 1 < len(args) and not args[i + 1].startswith("-"):
+            host = args[i + 1]
+    if "--lan" in args:
+        host = "0.0.0.0"  # noqa: S104 - 사용자가 명시적으로 요청한 경우만
+    return port, host
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    port, host = parse_args(args)
     try:
-        serve(port)
+        serve(port, host)
     except OSError as exc:
         core.fail(f"{port} 포트를 열지 못했습니다.",
                   "이미 실행 중이거나 포트가 막혀 있습니다. --port 8081 로 바꿔 보세요.", exc)
