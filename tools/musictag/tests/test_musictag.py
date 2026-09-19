@@ -244,6 +244,58 @@ def test_choose_meta_no_result_falls_back(monkeypatch):
     assert m.choose_meta("q", "T", "A")["title"] == "T"
 
 
+@pytest.mark.parametrize(("text", "want"), [
+    ("https://youtu.be/AAA", True),
+    ("http://x/y", True),
+    ("“youtu.be/AAA”", True),
+    ("https://www.youtube.com/watch?v=AAA", True),
+    ("show", False),
+    ("edit", False),
+    ("song.m4a", False),
+    ("", False),
+])
+def test_is_link(text, want):
+    assert m.is_link(text) is want
+
+
+def test_auto_meta_takes_first_result(monkeypatch):
+    monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(m, "ask", lambda *a, **k: pytest.fail("물어보면 안 된다"))
+    assert m.auto_meta("q", "T", "A")["title"] == "Song"
+
+
+def test_auto_meta_falls_back_without_results(monkeypatch):
+    monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([], ""))
+    assert m.auto_meta("q", "영상제목", "채널")["title"] == "영상제목"
+
+
+def test_link_argument_saves_without_any_prompt(tmp_path, monkeypatch, silent_m4a):
+    """링크만 붙이면 질문 없이 파일이 나와야 한다."""
+    monkeypatch.setattr(m, "OUT_DIR", tmp_path / "music")
+    monkeypatch.setattr(m, "TMP_DIR", tmp_path / "tmp")
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    monkeypatch.setattr(m, "ask", lambda *a, **k: pytest.fail("질문이 나왔다"))
+    monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(m, "get_cover", lambda *a, **k: (None, ""))
+
+    def fake_download(url, hooks=None):
+        assert url == "https://youtu.be/AAA"
+        dest = tmp_path / "tmpaudio.m4a"
+        dest.write_bytes(silent_m4a.read_bytes())
+        return dest, {"title": "[MV] Artist - Song", "uploader": "Chan", "id": "AAA"}
+
+    monkeypatch.setattr(m, "download", fake_download)
+    assert m.main(["https://youtu.be/AAA?si=x"]) == 0
+    saved = tmp_path / "music" / "Artist_-_Song.m4a"
+    assert saved.exists() and m.read_tags(saved)["album"] == "Album"
+
+
+def test_progress_hook_prints_percent(capsys):
+    m.progress({"status": "downloading", "downloaded_bytes": 25, "total_bytes": 100})
+    assert "25%" in capsys.readouterr().out
+    m.progress({"status": "finished"})
+
+
 def test_main_rejects_unknown_command(capsys):
     assert m.main(["bogus"]) == 1
     assert "알 수 없는 명령" in capsys.readouterr().out

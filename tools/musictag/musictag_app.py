@@ -357,6 +357,7 @@ class Handler(BaseHTTPRequestHandler):
     api: Api
     key: str
     server_version = "musictag"
+    protocol_version = "HTTP/1.1"  # 연결을 재사용해 요청마다 새로 붙지 않게 한다
 
     def log_message(self, *args):  # 조용히
         pass

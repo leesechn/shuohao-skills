@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """musictag.py - a-Shell(iPadOS)용 음원 다운로드/태깅 도구.
 
-  python3 musictag.py                 링크 입력 -> 다운로드 -> 태그 -> 저장
+  python3 musictag.py <링크>          묻지 않고 바로 저장 (가장 빠름)
+  python3 musictag.py <링크> --ask    항목을 하나씩 확인하며 저장
+  python3 musictag.py                 링크를 물어본 뒤 하나씩 확인
   python3 musictag.py edit 곡.m4a     기존 파일 태그 수정
   python3 musictag.py show 곡.m4a     태그 요약 출력
   옵션: --debug (traceback), --country JP,KR,US
@@ -59,6 +61,11 @@ def ask(label, default=""):
     except EOFError:
         return default
     return got or default
+
+def is_link(text):
+    """명령어가 아니라 링크로 보이는가."""
+    t = (text or "").strip().strip(QUOTES)
+    return t.startswith(("http://", "https://")) or "youtu" in t.lower()
 
 def clean_url(raw):
     """앞뒤 공백/휘어진 따옴표와 ?si= 같은 추적 파라미터 제거."""
@@ -310,16 +317,37 @@ def download(url, hooks=None):
         die("받은 파일을 찾지 못했습니다.", "링크를 확인하고 다시 실행하세요.")
     return files[0], info
 
-def cmd_download(countries=None):
-    url = clean_url(ask("유튜브 링크를 붙여넣고 Enter", ""))
+def auto_meta(query, fb_title, fb_artist, countries=None):
+    """묻지 않고 첫 번째 검색 결과를 쓴다."""
+    results, country = itunes_search(query, countries)
+    if not results:
+        note("곡 정보를 찾지 못해 영상 제목을 그대로 씁니다.")
+        return blank_meta(fb_title, fb_artist)
+    meta = meta_from_result(results[0])
+    note(f"[{country}] {meta['artist']} - {meta['title']} ({meta['album']})")
+    return meta
+
+def progress(d):
+    if d.get("status") != "downloading":
+        return
+    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+    done = d.get("downloaded_bytes") or 0
+    if total:
+        print(f"\r받는 중 {min(99, int(done * 100 / total))}%", end="", flush=True)
+
+def cmd_download(countries=None, url=None, auto=False):
+    url = clean_url(url or ask("유튜브 링크를 붙여넣고 Enter", ""))
     if not url:
         die("링크가 비어 있습니다.", "다시 실행해 링크를 붙여넣으세요.")
     note("다운로드 중...")
-    tmp, info = download(url)
+    tmp, info = download(url, hooks=[progress])
     title, uploader = info.get("title", ""), info.get("uploader", "")
     video_id = "".join(c for c in info.get("id", "") if c.isalnum() or c in "-_")
-    note(f"영상: {title} / {uploader}")
-    meta = confirm_meta(choose_meta(build_query(title), title, uploader, countries))
+    note(f"\r영상: {title} / {uploader}")
+    if auto:
+        meta = auto_meta(build_query(title), title, uploader, countries)
+    else:
+        meta = confirm_meta(choose_meta(build_query(title), title, uploader, countries))
     cover, kind = get_cover(meta, video_id)
     try:
         write_tags(tmp, meta, cover, kind, take_lyrics())
@@ -336,7 +364,8 @@ def main(argv=None):
     global DEBUG
     args = list(sys.argv[1:] if argv is None else argv)
     DEBUG = "--debug" in args
-    args = [a for a in args if a != "--debug"]
+    ask_mode = "--ask" in args
+    args = [a for a in args if a not in ("--debug", "--ask")]
     countries = None
     if "--country" in args:
         i = args.index("--country")
@@ -349,8 +378,12 @@ def main(argv=None):
             if len(args) < 2:
                 die("파일명을 함께 입력하세요.", f"예: python3 musictag.py {cmd} 곡.m4a")
             (cmd_show if cmd == "show" else cmd_edit)(args[1])
+        elif is_link(cmd):
+            # 링크를 붙여 넣으면 묻지 않고 바로 저장한다. --ask면 하나씩 확인
+            cmd_download(countries, url=cmd, auto=not ask_mode)
         elif cmd:
-            die(f"알 수 없는 명령 '{cmd}'.", "사용법: python3 musictag.py [edit|show 곡.m4a]")
+            die(f"알 수 없는 명령 '{cmd}'.",
+                "사용법: python3 musictag.py [링크 | edit 곡.m4a | show 곡.m4a]")
         else:
             cmd_download(countries)
     except KeyboardInterrupt:
