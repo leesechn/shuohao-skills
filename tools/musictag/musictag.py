@@ -97,17 +97,19 @@ def build_query(title):
     t = re.sub(r"\s+", " ", re.sub(r"[|/•·\-–—_~!@#$^&*+=]+", " ", t)).strip()
     return t or re.sub(r"\s+", " ", (title or "")).strip()
 
-def http_get(url):
+def http_get(url, timeout=None):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout or TIMEOUT) as resp:  # noqa: S310
         return resp.read()
+
+def itunes_url(term, country, limit=5):
+    return "https://itunes.apple.com/search?" + urllib.parse.urlencode(
+        {"term": term, "entity": "song", "limit": limit, "country": country})
 
 def itunes_search(term, countries=None, limit=5):
     for country in countries or COUNTRIES:
-        url = "https://itunes.apple.com/search?" + urllib.parse.urlencode(
-            {"term": term, "entity": "song", "limit": limit, "country": country})
         try:
-            results = json.loads(http_get(url).decode("utf-8")).get("results", [])
+            results = json.loads(http_get(itunes_url(term, country, limit)).decode("utf-8")).get("results", [])
         except Exception as exc:  # noqa: BLE001
             fail(f"iTunes 검색 실패({country}).", "네트워크 상태를 확인하세요.", exc)
             continue
@@ -279,8 +281,12 @@ def cmd_edit(name):
     write_tags(path, meta, cover, kind, take_lyrics() or None)
     note(f"완료: {path}")
 
-def download(url):
-    """yt-dlp를 라이브러리로 호출. ffmpeg 후처리 없이 m4a 원본만 받는다."""
+def download(url, hooks=None):
+    """yt-dlp를 라이브러리로 호출. ffmpeg 후처리 없이 m4a 원본만 받는다.
+
+    hooks: yt-dlp progress_hooks. 다운로드가 시작되는 순간 제목을 알 수 있어
+    곡 정보 검색을 다운로드와 겹쳐 돌릴 수 있다.
+    """
     try:
         import yt_dlp
     except ImportError as exc:
@@ -291,7 +297,8 @@ def download(url):
         old.unlink()
     opts = {"format": "bestaudio[ext=m4a]/bestaudio", "noplaylist": True,
             "outtmpl": str(TMP_DIR / "tmpaudio.%(ext)s"),
-            "quiet": True, "no_warnings": True, "noprogress": True}
+            "quiet": True, "no_warnings": True, "noprogress": True,
+            "progress_hooks": list(hooks or [])}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)

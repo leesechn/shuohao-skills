@@ -55,6 +55,39 @@ def get_key() -> str:
     return key
 
 
+SEARCH_TIMEOUT = 8
+SAVE_WAIT = 180
+
+
+def itunes_parallel(term, countries=None, limit=5):
+    """국가별 조회를 동시에 던지고, 우선순위 순으로 첫 결과를 고른다.
+
+    순차 조회는 앞 국가가 빌 때마다 왕복이 한 번씩 더 붙는다.
+    동시에 던지면 걸리는 시간이 '가장 느린 하나'로 고정된다.
+    """
+    countries = countries or core.COUNTRIES
+    out: dict[str, list] = {}
+
+    def work(country):
+        try:
+            body = core.http_get(core.itunes_url(term, country, limit), timeout=SEARCH_TIMEOUT)
+            out[country] = json.loads(body.decode("utf-8")).get("results", [])
+        except Exception:  # noqa: BLE001
+            out[country] = []
+
+    threads = [threading.Thread(target=work, args=(c,), daemon=True) for c in countries]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=SEARCH_TIMEOUT + 1)
+    for country in countries:
+        if out.get(country):
+            return out[country], country
+    if not out:
+        core.fail("곡 정보를 찾지 못했습니다.", "네트워크 상태를 확인하세요.")
+    return [], ""
+
+
 class Api:
     """HTTP와 무관한 순수 로직. 테스트는 이 클래스를 직접 호출한다."""
 
@@ -62,6 +95,23 @@ class Api:
         self.docs = Path(docs or core.DOCS)
         self.out_dir = Path(out_dir or core.OUT_DIR)
         self.jobs: dict[str, dict] = {}
+        self.tag_cache: dict[str, tuple] = {}
+
+    def tags_of(self, path):
+        """파일이 바뀌지 않았으면 다시 파싱하지 않는다."""
+        stat = path.stat()
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        hit = self.tag_cache.get(str(path))
+        if hit and hit[0] == stamp:
+            return hit[1], stat
+        try:
+            tags = core.read_tags(path)
+        except Exception:  # noqa: BLE001
+            tags = {}
+        if len(self.tag_cache) > 500:
+            self.tag_cache.clear()
+        self.tag_cache[str(path)] = (stamp, tags)
+        return tags, stat
 
     # ---------------------------------------------------------- 다운로드 작업
     def start(self, payload):
@@ -69,34 +119,70 @@ class Api:
         if not url:
             return {"error": "링크가 비어 있습니다. 유튜브 링크를 붙여넣어 주세요."}
         jid = secrets.token_urlsafe(6)
-        job = {"id": jid, "state": "working", "log": ["다운로드 중..."],
-               "url": url, "tmp": None, "video": {}, "candidates": []}
+        job = {"id": jid, "state": "working", "log": ["다운로드 중..."], "dl": "running",
+               "pct": 0, "done": threading.Event(), "url": url, "tmp": None,
+               "video": {}, "candidates": []}
         self.jobs[jid] = job
         threading.Thread(target=self._run, args=(job,), daemon=True).start()
         return {"job": jid}
 
     def _run(self, job):
+        """다운로드가 시작되는 순간 제목을 얻어, 곡 정보 검색을 동시에 돌린다.
+
+        예전에는 다운로드가 끝나야 검색을 시작했다. 이제는 사용자가 후보를
+        고르고 태그를 손보는 동안 음원이 뒤에서 계속 내려온다.
+        """
         _local.log = job["log"]
+        started = threading.Event()
+
+        def hook(d):
+            info = d.get("info_dict") or {}
+            if d.get("status") != "downloading":
+                return
+            done, total = d.get("downloaded_bytes") or 0, (
+                d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
+            job["pct"] = min(99, int(done * 100 / total)) if total else 0
+            if not started.is_set() and info.get("title"):
+                started.set()
+                self._begin_search(job, info)
+
         try:
-            tmp, info = core.download(job["url"])
-            job["tmp"] = str(tmp)
-            vid = "".join(c for c in info.get("id", "") if c.isalnum() or c in "-_")
-            job["video"] = {"title": info.get("title", ""),
-                            "uploader": info.get("uploader", ""), "id": vid}
-            job["log"].append("곡 정보를 찾는 중...")
-            job["query"] = core.build_query(info.get("title", ""))
-            job["candidates"] = self._find(job["query"], None)
-            job["state"] = "ready"
+            tmp, info = core.download(job["url"], hooks=[hook])
+            job["tmp"], job["pct"], job["dl"] = str(tmp), 100, "done"
+            if not started.is_set():  # 훅이 한 번도 안 불린 경우
+                started.set()
+                self._begin_search(job, info).join(SEARCH_TIMEOUT + 2)
         except BaseException as exc:  # noqa: BLE001 - die()의 SystemExit 포함
             if not any(line.startswith("오류") for line in job["log"]):
                 core.fail("다운로드에 실패했습니다.",
                           "링크를 확인하거나 a-Shell에서 'pip install -U yt-dlp'를 실행하세요.", exc)
-            job["state"] = "error"
+            job["dl"], job["state"] = "error", "error"
         finally:
+            job["done"].set()
             _local.log = None
 
+    def _begin_search(self, job, info):
+        """제목을 알게 된 즉시 곡 정보 검색을 별도 스레드로 시작한다."""
+        vid = "".join(c for c in info.get("id", "") if c.isalnum() or c in "-_")
+        job["video"] = {"title": info.get("title", ""),
+                        "uploader": info.get("uploader", ""), "id": vid}
+        job["query"] = core.build_query(info.get("title", ""))
+
+        def work():
+            _local.log = job["log"]
+            try:
+                job["candidates"] = self._find(job["query"], None)
+                if job["state"] == "working":
+                    job["state"] = "ready"
+            finally:
+                _local.log = None
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        return thread
+
     def _find(self, query, countries):
-        results, country = core.itunes_search(query, countries)
+        results, country = itunes_parallel(query, countries)
         out = []
         for r in results:
             meta = core.meta_from_result(r)
@@ -110,6 +196,7 @@ class Api:
         if not job:
             return {"error": "작업을 찾을 수 없습니다. 링크부터 다시 넣어 주세요."}
         return {"state": job["state"], "log": job["log"][-4:], "video": job["video"],
+                "dl": job["dl"], "pct": job["pct"],
                 "query": job.get("query", ""), "candidates": job["candidates"],
                 "blank": core.blank_meta(job["video"].get("title", ""),
                                          job["video"].get("uploader", ""))}
@@ -154,7 +241,11 @@ class Api:
 
     def save(self, payload):
         job = self.jobs.get(payload.get("job", ""))
-        if not job or not job.get("tmp"):
+        if not job:
+            return {"error": "받아 둔 음원이 없습니다. 링크부터 다시 넣어 주세요."}
+        if not job["done"].wait(timeout=SAVE_WAIT):  # 아직 받는 중이면 기다린다
+            return {"error": "다운로드가 아직 끝나지 않았습니다. 잠시 뒤 다시 눌러 주세요."}
+        if job["dl"] != "done" or not job.get("tmp"):
             return {"error": "받아 둔 음원이 없습니다. 링크부터 다시 넣어 주세요."}
         tmp = Path(job["tmp"])
         if not tmp.exists():
@@ -183,13 +274,10 @@ class Api:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         items = []
         for path in sorted(self.out_dir.glob("*.m4a")):
-            try:
-                tags = core.read_tags(path)
-            except Exception:  # noqa: BLE001
-                tags = {}
+            tags, stat = self.tags_of(path)
             items.append({"name": path.name, "title": tags.get("title") or path.stem,
                           "artist": tags.get("artist", ""), "album": tags.get("album", ""),
-                          "cover": bool(tags.get("has_cover"))})
+                          "cover": bool(tags.get("has_cover")), "v": stat.st_mtime_ns})
         return {"items": items}
 
     def track(self, name):
@@ -273,11 +361,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # 조용히
         pass
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store"):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -301,7 +389,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = urllib.parse.urlsplit(self.path)
         query = urllib.parse.parse_qs(parts.query)
         if parts.path == "/icon.png":
-            return self._send(200, app_icon(), "image/png")
+            return self._send(200, app_icon(), "image/png", "public, max-age=604800")
         if parts.path == "/":
             if not self._authed(query):
                 return self._send(403, LOCKED.encode("utf-8"), "text/html; charset=utf-8")
@@ -316,7 +404,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.api.track(query.get("name", [""])[0]))
         if parts.path == "/api/art":
             data = self.api.art(query.get("name", [""])[0])
-            return self._send(200, data, "image/jpeg") if data else self._send(404, b"")
+            if not data:
+                return self._send(404, b"")
+            # 주소에 파일 수정 시각(v)이 붙어 있어 바뀌면 자동으로 새로 받는다
+            return self._send(200, data, "image/jpeg", "private, max-age=604800")
         return self._json({"error": "없는 주소입니다."}, 404)
 
     def do_HEAD(self):  # noqa: N802
@@ -471,6 +562,8 @@ button.mini{border:1px solid var(--line);background:none;color:var(--dim);font:i
 .chips button{border:1px solid var(--line);background:none;color:var(--dim);font:inherit;
   font-size:13px;padding:7px 11px;border-radius:999px}
 .chips button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.bar{height:3px;background:var(--line);border-radius:2px;margin-top:11px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .35s ease}
 .spin{width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--accent);
   border-radius:50%;display:inline-block;vertical-align:-2px;animation:s .7s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}
@@ -502,7 +595,10 @@ details[open] summary::after{content:" ⌃"}
     <p class="err hide" id="e-url"></p>
   </div>
 
-  <div class="card hide" id="c-work"><span class="spin"></span> <span id="worklog">준비 중...</span></div>
+  <div class="card hide" id="c-work">
+    <span class="spin"></span> <span id="worklog">준비 중...</span>
+    <div class="bar"><i id="dlbar"></i></div>
+  </div>
 
   <div class="card hide" id="c-pick">
     <h2>곡 선택</h2>
@@ -623,20 +719,32 @@ async function start() {
   err('#e-url', ''); $('#btn-get').disabled = true;
   show('#c-pick', false); show('#c-meta', false); show('#c-work', true);
   $('#worklog').textContent = '다운로드 중...';
+  window.shown = false; $('#dlbar').style.width = '0%';
   const r = await api('/api/start', {url: $('#url').value});
   if (r.error) { show('#c-work', false); $('#btn-get').disabled = false; return err('#e-url', r.error); }
   job = r.job; poll();
 }
 async function poll() {
   const r = await api('/api/job?id=' + job);
-  $('#worklog').textContent = (r.log || []).slice(-1)[0] || '진행 중...';
-  if (r.state === 'working') return setTimeout(poll, 700);
-  $('#btn-get').disabled = false; show('#c-work', false);
-  if (r.state === 'error') return err('#e-url', (r.log || []).join(' '));
-  $('#sub').textContent = r.video.title || ''; window.vid = r.video.id || '';
-  $('#q').value = r.query || '';
-  window.blank = r.blank;
-  render(r.candidates);
+  const pct = r.pct || 0, running = r.dl === 'running';
+  $('#worklog').textContent = running ? `음원 받는 중 ${pct}%`
+    : ((r.log || []).slice(-1)[0] || '진행 중...');
+  $('#dlbar').style.width = (running ? pct : 100) + '%';
+  if (r.state === 'error') {
+    show('#c-work', false); $('#btn-get').disabled = false;
+    return err('#e-url', (r.log || []).join(' '));
+  }
+  if (r.state === 'ready' && !window.shown) {   // 후보는 다운로드를 기다리지 않는다
+    window.shown = true; $('#btn-get').disabled = false;
+    $('#sub').textContent = r.video.title || ''; window.vid = r.video.id || '';
+    $('#q').value = r.query || ''; window.blank = r.blank;
+    render(r.candidates);
+  }
+  const btn = $('#btn-save');
+  btn.disabled = running;
+  btn.textContent = running ? `저장 (받는 중 ${pct}%)` : '저장';
+  if (r.state === 'working' || running) return setTimeout(poll, window.shown ? 1000 : 400);
+  show('#c-work', false);
 }
 function render(list) {
   const box = $('#cands'); box.innerHTML = '';
@@ -698,7 +806,7 @@ async function save() {
   err('#e-save', ''); $('#btn-save').disabled = true;
   const r = await api('/api/save', {job, meta: collect('form', chosen || {}),
     lyrics: $('#lyrics').value, cover: {mode: covMode, data: covData}});
-  $('#btn-save').disabled = false;
+  $('#btn-save').disabled = false; $('#btn-save').textContent = '저장';
   if (r.error) return err('#e-save', r.error + (r.detail ? ' (' + r.detail + ')' : ''));
   if (r.warn) toast(r.warn);
   toast('저장했습니다: ' + r.name);
@@ -713,7 +821,7 @@ async function loadLib() {
   if (!r.items || !r.items.length) { box.innerHTML = '<p class="hint">아직 저장된 곡이 없습니다.</p>'; return; }
   for (const it of r.items) {
     const el = document.createElement('div'); el.className = 'item';
-    el.innerHTML = (it.cover ? `<img src="/api/art?name=${encodeURIComponent(it.name)}&k=${K}" alt="">`
+    el.innerHTML = (it.cover ? `<img src="/api/art?name=${encodeURIComponent(it.name)}&k=${K}&v=${it.v}" alt="" loading="lazy">`
       : '<div class="ph"></div>') +
       `<div class="t"><div>${esc(it.title)}</div><div class="s">${esc(it.artist)} · ${esc(it.album)}</div></div>`;
     el.onclick = () => openTrack(it.name);

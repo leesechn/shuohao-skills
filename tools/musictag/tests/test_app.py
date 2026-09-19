@@ -38,7 +38,7 @@ def wait(api_obj, jid, timeout=5.0):
 
 
 def fake_download(tmp_path):
-    def _dl(url):
+    def _dl(url, hooks=None):
         tmp = tmp_path / "tmpaudio.m4a"
         tmp.write_bytes(silent_m4a_bytes())
         return tmp, {"title": "[MV] Artist - Song (Official)", "uploader": "Chan", "id": "VID123"}
@@ -60,12 +60,12 @@ def test_start_rejects_empty_url(api):
 def test_start_cleans_url_before_download(api, tmp_path, monkeypatch):
     seen = []
 
-    def _dl(url):
+    def _dl(url, hooks=None):
         seen.append(url)
-        return fake_download(tmp_path)(url)
+        return fake_download(tmp_path)(url, hooks)
 
     monkeypatch.setattr(core, "download", _dl)
-    monkeypatch.setattr(core, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(app, "itunes_parallel", lambda *a, **k: ([SAMPLE], "JP"))
     jid = api.start({"url": "“https://youtu.be/VID123?si=x”"})["job"]
     assert wait(api, jid) == "ready"
     assert seen == ["https://youtu.be/VID123"]
@@ -73,7 +73,7 @@ def test_start_cleans_url_before_download(api, tmp_path, monkeypatch):
 
 def test_job_returns_candidates_and_blank(api, tmp_path, monkeypatch):
     monkeypatch.setattr(core, "download", fake_download(tmp_path))
-    monkeypatch.setattr(core, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(app, "itunes_parallel", lambda *a, **k: ([SAMPLE], "JP"))
     jid = api.start({"url": "https://youtu.be/VID123"})["job"]
     assert wait(api, jid) == "ready"
     data = api.job(jid)
@@ -86,7 +86,7 @@ def test_job_returns_candidates_and_blank(api, tmp_path, monkeypatch):
 
 
 def test_job_reports_download_failure_in_korean(api, monkeypatch):
-    def boom(url):
+    def boom(url, hooks=None):
         core.die("다운로드에 실패했습니다.", "링크를 다시 확인하세요.")
 
     monkeypatch.setattr(core, "download", boom)
@@ -110,9 +110,101 @@ def test_search_passes_country_order(api, monkeypatch):
         seen["countries"] = countries
         return [SAMPLE], "KR"
 
-    monkeypatch.setattr(core, "itunes_search", fake)
+    monkeypatch.setattr(app, "itunes_parallel", fake)
     out = api.search({"query": "abc", "countries": ["KR", "US"]})
     assert seen["countries"] == ["KR", "US"] and out["candidates"][0]["country"] == "KR"
+
+
+# ------------------------------------------------------------ 속도: 병렬 조회
+def test_itunes_parallel_keeps_priority_order(monkeypatch):
+    """JP가 비면 KR, KR도 비면 US. 동시에 던져도 우선순위는 그대로."""
+    def fake(url, timeout=None):
+        hit = "country=KR" in url or "country=US" in url
+        return json.dumps({"results": [SAMPLE] if hit else []}).encode()
+
+    monkeypatch.setattr(core, "http_get", fake)
+    results, country = app.itunes_parallel("q")
+    assert country == "KR" and results == [SAMPLE]
+
+
+def test_itunes_parallel_is_actually_concurrent(monkeypatch):
+    """순차라면 3개 x 0.3초 = 0.9초. 동시라면 0.3초 근처에서 끝나야 한다."""
+    def slow(url, timeout=None):
+        time.sleep(0.3)
+        return json.dumps({"results": [SAMPLE] if "country=US" in url else []}).encode()
+
+    monkeypatch.setattr(core, "http_get", slow)
+    started = time.monotonic()
+    results, country = app.itunes_parallel("q")
+    elapsed = time.monotonic() - started
+    assert country == "US" and results == [SAMPLE]
+    assert elapsed < 0.6, f"병렬이 아님: {elapsed:.2f}초"
+
+
+def test_itunes_parallel_survives_failures(monkeypatch):
+    def boom(url, timeout=None):
+        raise OSError("네트워크 없음")
+
+    monkeypatch.setattr(core, "http_get", boom)
+    assert app.itunes_parallel("q") == ([], "")
+
+
+# ------------------------------------------------------------ 속도: 겹쳐 받기
+def hooked_download(tmp_path, hold):
+    """제목을 먼저 알리고, 다운로드는 hold가 풀릴 때까지 끌고 간다."""
+    def _dl(url, hooks=None):
+        info = {"title": "Artist - Song", "uploader": "Chan", "id": "VID123"}
+        for hook in hooks or []:
+            hook({"status": "downloading", "info_dict": info,
+                  "downloaded_bytes": 30, "total_bytes": 100})
+        hold.wait(5)
+        tmp = tmp_path / "tmpaudio.m4a"
+        tmp.write_bytes(silent_m4a_bytes())
+        return tmp, info
+    return _dl
+
+
+def test_candidates_appear_before_download_finishes(api, tmp_path, monkeypatch):
+    """예전에는 다운로드가 끝나야 후보가 떴다. 이제는 받는 도중에 떠야 한다."""
+    hold = threading.Event()
+    monkeypatch.setattr(core, "download", hooked_download(tmp_path, hold))
+    monkeypatch.setattr(app, "itunes_parallel", lambda *a, **k: ([SAMPLE], "JP"))
+    jid = api.start({"url": "https://youtu.be/VID123"})["job"]
+
+    end = time.time() + 5
+    while time.time() < end and api.job(jid)["state"] != "ready":
+        time.sleep(0.02)
+    data = api.job(jid)
+    assert data["state"] == "ready", "다운로드 중에 후보가 뜨지 않음"
+    assert data["dl"] == "running", "다운로드가 이미 끝나버려 겹치기를 검증하지 못함"
+    assert data["candidates"] and data["pct"] == 30
+    hold.set()
+    assert wait(api, jid) == "ready"
+
+
+def test_save_waits_for_download_then_times_out(api, tmp_path, monkeypatch):
+    hold = threading.Event()
+    monkeypatch.setattr(core, "download", hooked_download(tmp_path, hold))
+    monkeypatch.setattr(app, "itunes_parallel", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(app, "SAVE_WAIT", 0.1)
+    jid = api.start({"url": "https://youtu.be/VID123"})["job"]
+    time.sleep(0.1)
+    out = api.save({"job": jid, "meta": {"title": "T", "artist": "A"}})
+    assert "아직" in out["error"]
+    hold.set()
+
+
+def test_progress_percent_is_reported(api, tmp_path, monkeypatch):
+    hold = threading.Event()
+    hold.set()
+    monkeypatch.setattr(core, "download", hooked_download(tmp_path, hold))
+    monkeypatch.setattr(app, "itunes_parallel", lambda *a, **k: ([SAMPLE], "JP"))
+    jid = api.start({"url": "https://youtu.be/VID123"})["job"]
+    assert wait(api, jid) == "ready"
+    end = time.time() + 5           # 검색 스레드가 먼저 끝날 수 있어 다운로드 완료를 따로 기다린다
+    while time.time() < end and api.job(jid)["dl"] == "running":
+        time.sleep(0.02)
+    assert api.job(jid)["dl"] == "done" and api.job(jid)["pct"] == 100
 
 
 # ------------------------------------------------------------ 커버 선택
@@ -157,7 +249,7 @@ def test_cover_youtube_uses_thumbnail(api, monkeypatch):
 # ------------------------------------------------------------ 저장 / 보관함
 def _saved(api_obj, tmp_path, monkeypatch, **over):
     monkeypatch.setattr(core, "download", fake_download(tmp_path))
-    monkeypatch.setattr(core, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(app, "itunes_parallel", lambda *a, **k: ([SAMPLE], "JP"))
     jid = api_obj.start({"url": "https://youtu.be/VID123"})["job"]
     wait(api_obj, jid)
     meta = dict(api_obj.job(jid)["candidates"][0])
@@ -210,6 +302,28 @@ def test_update_keeps_cover_when_not_touched(api, tmp_path, monkeypatch):
     name = _saved(api, tmp_path, monkeypatch)["name"]
     api.update({"name": name, "meta": api.track(name)["meta"], "lyrics": "x"})
     assert core.read_tags(api.out_dir / name)["has_cover"] is True
+
+
+def test_library_caches_tag_reads(api, tmp_path, monkeypatch):
+    """보관함을 열 때마다 모든 파일을 다시 파싱하면 곡이 늘수록 느려진다."""
+    _saved(api, tmp_path, monkeypatch)
+    api.library()  # 캐시 채우기
+    calls = []
+    real = core.read_tags
+    monkeypatch.setattr(core, "read_tags", lambda p: (calls.append(p), real(p))[1])
+    api.library()
+    api.library()
+    assert len(calls) == 0, "캐시가 먹지 않음"
+
+    saved = next(api.out_dir.glob("*.m4a"))
+    api.update({"name": saved.name, "meta": {"title": "바뀜", "artist": "A"}})
+    api.library()
+    assert len(calls) == 1, "파일이 바뀌었는데 캐시를 그대로 씀"
+
+
+def test_library_item_has_version_for_cache_busting(api, tmp_path, monkeypatch):
+    _saved(api, tmp_path, monkeypatch)
+    assert api.library()["items"][0]["v"] > 0
 
 
 def test_missing_file_errors(api):
