@@ -48,8 +48,10 @@ python3 musictag.py show 아무파일.m4a
 
 ```bash
 cd ~/Documents
-python3 musictag.py https://youtu.be/xxxxxxxx
+python3 musictag.py https://youtu.be/dQw4w9WgXcQ
 ```
+
+(뒤의 `dQw4w9WgXcQ` 자리에 **본인이 복사한 진짜 링크**를 넣으세요.)
 
 **질문이 하나도 없습니다.** 받고, iTunes 첫 번째 결과로 태그하고, 커버 붙이고,
 `~/Documents/music/아티스트_-_제목.m4a`로 저장한 뒤 끝납니다. 받는 동안 진행률이 보입니다.
@@ -65,11 +67,37 @@ python3 musictag.py https://youtu.be/xxxxxxxx
 곡 정보를 직접 확인하고 싶으면 `--ask`를 붙이세요. 후보 5개를 보여주고 항목별로 물어봅니다.
 
 ```bash
-python3 musictag.py https://youtu.be/xxxxxxxx --ask
+python3 musictag.py https://youtu.be/dQw4w9WgXcQ --ask
 ```
 
-> **a-Shell에서 링크 붙여넣기**: `python3 musictag.py ` 까지 치고 한 칸 띄운 뒤,
-> 화면을 길게 눌러 **붙여넣기** → `Enter`. 따옴표는 붙여도 되고 안 붙여도 됩니다.
+### 링크 넣는 3가지 방법
+
+`xxxxxxxx`는 **예시입니다. 그대로 치면 안 됩니다.** 유튜브 영상 ID는 11글자입니다.
+(예시를 그대로 넣으면 `'xxxxxxxx'는 실제 영상 주소가 아닙니다`라고 막아 줍니다.)
+
+**① 붙여넣기** — 유튜브 앱에서 `공유 → 복사` 후, a-Shell에서
+`python3 musictag.py ` 까지 치고 한 칸 띄운 뒤 화면을 길게 눌러 **붙여넣기** → `Enter`.
+
+**② 클립보드를 파일로** — 터미널에 긴 주소를 붙이기 싫을 때. a-Shell에는 `pbpaste`가 있습니다.
+
+```bash
+pbpaste > link.txt
+python3 musictag.py link.txt
+```
+
+**③ 바로 넘기기** — a-Shell이 `$(...)`를 지원하면 한 줄로 끝납니다. (기기에 따라 안 될 수 있습니다)
+
+```bash
+python3 musictag.py "$(pbpaste)"
+```
+
+진짜 링크는 이런 모양입니다.
+
+```text
+https://youtu.be/dQw4w9WgXcQ
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+```
+
 
 ## 3. 앱으로 쓰기 (다른 기기에서 조작할 때만)
 
@@ -174,6 +202,7 @@ B는 기술적으로 되긴 하지만, **공개 서비스로 열면 안 됩니�
 | 명령 | 질문 | 쓰는 때 |
 | --- | --- | --- |
 | `musictag.py <링크>` | 없음 | 평소. 가장 빠릅니다 |
+| `musictag.py link.txt` | 없음 | `pbpaste > link.txt` 로 넣었을 때 |
 | `musictag.py <링크> --ask` | 후보 선택 + 항목별 확인 | 검색이 엉뚱한 곡을 잡았을 때 |
 | `musictag.py` | 링크부터 물어봄 | 링크를 나중에 붙여넣고 싶을 때 |
 | `musictag.py edit 곡.m4a` | 항목별 확인 | 저장한 파일을 고칠 때 |
@@ -182,7 +211,7 @@ B는 기술적으로 되긴 하지만, **공개 서비스로 열면 안 됩니�
 ### `--ask` 흐름
 
 ```bash
-python3 musictag.py https://youtu.be/xxxxxxxx --ask
+python3 musictag.py https://youtu.be/dQw4w9WgXcQ --ask
 ```
 
 1. 앞뒤 공백, 휘어진 따옴표(`“ ” ‘ ’`), `?si=` 같은 추적 파라미터는 자동으로 제거됩니다.

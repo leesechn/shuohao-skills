@@ -258,6 +258,89 @@ def test_is_link(text, want):
     assert m.is_link(text) is want
 
 
+@pytest.mark.parametrize(("url", "want"), [
+    ("https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+    ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5", "dQw4w9WgXcQ"),
+    ("https://m.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+    ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+    ("https://youtu.be/xxxxxxxx", "xxxxxxxx"),
+    ("https://example.com/a.mp3", ""),
+])
+def test_video_id(url, want):
+    assert m.video_id(url) == want
+
+
+@pytest.mark.parametrize("url", [
+    "https://youtu.be/xxxxxxxx",                     # 설명서 예시를 그대로 넣은 경우
+    "https://www.youtube.com/watch?v=xxxxxxxxxxx",   # 11글자지만 한 글자 반복
+    "https://youtu.be/abc",
+])
+def test_check_link_rejects_fake_ids(url, capsys):
+    with pytest.raises(SystemExit):
+        m.check_link(url)
+    out = capsys.readouterr().out
+    assert "실제 영상 주소가 아닙니다" in out and "11글자" in out
+
+
+@pytest.mark.parametrize("url", [
+    "https://youtu.be/dQw4w9WgXcQ",
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://example.com/song.mp3",   # 유튜브가 아니면 통과시킨다
+])
+def test_check_link_allows_real_links(url):
+    assert m.check_link(url) is None
+
+
+def test_read_link_from_text_file(tmp_path):
+    f = tmp_path / "link.txt"
+    f.write_text("\n\n  https://youtu.be/dQw4w9WgXcQ  \n", encoding="utf-8")
+    assert m.read_link(str(f)) == "https://youtu.be/dQw4w9WgXcQ"
+    assert m.is_link(str(f)) is True
+
+
+def test_read_link_passes_through_plain_url():
+    assert m.read_link("https://youtu.be/AAA") == "https://youtu.be/AAA"
+
+
+def test_fake_link_is_rejected_before_download(tmp_path, monkeypatch, capsys):
+    """예시 주소를 넣으면 다운로드를 시도조차 하지 않아야 한다."""
+    monkeypatch.setattr(m, "download", lambda *a, **k: pytest.fail("다운로드를 시도했다"))
+    monkeypatch.setattr(m, "OUT_DIR", tmp_path / "music")
+    assert m.main(["https://youtu.be/xxxxxxxx"]) == 1
+    assert "11글자" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("message", "expect"), [
+    ("ERROR: Unsupported URL: https://x", "이 주소로는 받을 수 없습니다."),
+    ("Sign in to confirm your age", "비공개"),
+    ("HTTP Error 500", "다운로드에 실패했습니다."),
+])
+def test_download_errors_are_explained(monkeypatch, tmp_path, capsys, message, expect):
+    monkeypatch.setattr(m, "TMP_DIR", tmp_path / "tmp")
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=True):
+            raise RuntimeError(message)
+
+    import sys as _sys
+    import types
+    fake = types.ModuleType("yt_dlp")
+    fake.YoutubeDL = FakeYDL
+    monkeypatch.setitem(_sys.modules, "yt_dlp", fake)
+    with pytest.raises(SystemExit):
+        m.download("https://youtu.be/dQw4w9WgXcQ")
+    assert expect in capsys.readouterr().out
+
+
 def test_auto_meta_takes_first_result(monkeypatch):
     monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
     monkeypatch.setattr(m, "ask", lambda *a, **k: pytest.fail("물어보면 안 된다"))
@@ -279,13 +362,13 @@ def test_link_argument_saves_without_any_prompt(tmp_path, monkeypatch, silent_m4
     monkeypatch.setattr(m, "get_cover", lambda *a, **k: (None, ""))
 
     def fake_download(url, hooks=None):
-        assert url == "https://youtu.be/AAA"
+        assert url == "https://youtu.be/dQw4w9WgXcQ"
         dest = tmp_path / "tmpaudio.m4a"
         dest.write_bytes(silent_m4a.read_bytes())
-        return dest, {"title": "[MV] Artist - Song", "uploader": "Chan", "id": "AAA"}
+        return dest, {"title": "[MV] Artist - Song", "uploader": "Chan", "id": "dQw4w9WgXcQ"}
 
     monkeypatch.setattr(m, "download", fake_download)
-    assert m.main(["https://youtu.be/AAA?si=x"]) == 0
+    assert m.main(["https://youtu.be/dQw4w9WgXcQ?si=x"]) == 0
     saved = tmp_path / "music" / "Artist_-_Song.m4a"
     assert saved.exists() and m.read_tags(saved)["album"] == "Album"
 

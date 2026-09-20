@@ -65,7 +65,32 @@ def ask(label, default=""):
 def is_link(text):
     """명령어가 아니라 링크로 보이는가."""
     t = (text or "").strip().strip(QUOTES)
-    return t.startswith(("http://", "https://")) or "youtu" in t.lower()
+    if t.startswith(("http://", "https://")) or "youtu" in t.lower():
+        return True
+    path = Path(t)
+    return bool(t) and path.suffix.lower() == ".txt" and path.is_file()
+
+def video_id(url):
+    """유튜브 링크에서 영상 ID를 뽑는다. 못 뽑으면 빈 문자열."""
+    p = urllib.parse.urlsplit(url)
+    host = p.netloc.lower().removeprefix("www.").removeprefix("m.")
+    if host == "youtu.be":
+        return p.path.strip("/").split("/")[0]
+    if host.endswith("youtube.com"):
+        if p.path.startswith(("/shorts/", "/embed/", "/live/")):
+            return p.path.split("/")[2] if len(p.path.split("/")) > 2 else ""
+        return urllib.parse.parse_qs(p.query).get("v", [""])[0]
+    return ""
+
+def check_link(url):
+    """예시 주소를 그대로 넣는 실수를 다운로드 전에 잡는다."""
+    vid = video_id(url)
+    if not vid:
+        return  # 유튜브가 아니면 yt-dlp에 맡긴다
+    if len(set(vid)) == 1 or len(vid) != 11:
+        die(f"'{vid}'는 실제 영상 주소가 아닙니다.",
+            "설명서의 예시(xxxxxxxx)가 아니라, 유튜브 앱에서 '공유 → 복사'한 "
+            "진짜 링크를 넣으세요. 영상 ID는 11글자입니다.")
 
 def clean_url(raw):
     """앞뒤 공백/휘어진 따옴표와 ?si= 같은 추적 파라미터 제거."""
@@ -310,6 +335,13 @@ def download(url, hooks=None):
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
     except Exception as exc:  # noqa: BLE001
+        text = str(exc).lower()
+        if "unsupported url" in text or "is not a valid url" in text:
+            die("이 주소로는 받을 수 없습니다.",
+                "유튜브 앱에서 '공유 → 복사'한 링크인지 확인하세요. "
+                "설명서의 예시 주소(xxxxxxxx)를 그대로 넣으면 이 오류가 납니다.", exc)
+        if "private" in text or "sign in" in text or "age" in text:
+            die("비공개·연령 제한 영상이라 받을 수 없습니다.", "다른 링크를 써 주세요.", exc)
         die("다운로드에 실패했습니다.",
             "'pip install -U yt-dlp'로 업데이트하거나 링크를 다시 확인하세요.", exc)
     files = sorted(TMP_DIR.glob("tmpaudio*"))
@@ -335,10 +367,20 @@ def progress(d):
     if total:
         print(f"\r받는 중 {min(99, int(done * 100 / total))}%", end="", flush=True)
 
+def read_link(arg):
+    """인자가 링크가 담긴 텍스트 파일이면 첫 줄을 읽는다."""
+    path = Path(arg or "")
+    if arg and path.suffix.lower() in (".txt", "") and path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.strip():
+                return line.strip()
+    return arg
+
 def cmd_download(countries=None, url=None, auto=False):
-    url = clean_url(url or ask("유튜브 링크를 붙여넣고 Enter", ""))
+    url = clean_url(read_link(url) or ask("유튜브 링크를 붙여넣고 Enter", ""))
     if not url:
         die("링크가 비어 있습니다.", "다시 실행해 링크를 붙여넣으세요.")
+    check_link(url)
     note("다운로드 중...")
     tmp, info = download(url, hooks=[progress])
     title, uploader = info.get("title", ""), info.get("uploader", "")
