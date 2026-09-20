@@ -440,6 +440,21 @@ def test_app_source_has_no_subprocess_or_shell_calls():
     assert not extra, f"허용되지 않은 import: {extra}"
 
 
+def test_page_reads_clipboard_and_accepts_url_param():
+    """복붙 없이 쓰려면 이 두 가지가 필요하다."""
+    page = app.PAGE
+    assert "navigator.clipboard.readText" in page
+    assert "pasteAndGo" in page
+    assert "get('url')" in page
+
+
+def test_page_aborts_instead_of_hanging():
+    """a-Shell이 정지하면 무한 로딩 대신 원인을 말해야 한다."""
+    page = app.PAGE
+    assert "AbortController" in page and "AbortError" in page
+    assert "Split View" in page
+
+
 def test_page_has_no_external_resources():
     """오프라인에서도 열려야 하므로 CDN/외부 폰트를 쓰지 않는다."""
     page = app.PAGE

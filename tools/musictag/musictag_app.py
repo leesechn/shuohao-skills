@@ -580,6 +580,7 @@ details[open] summary::after{content:" ⌃"}
 </style></head>
 <body><div class="wrap">
 <header><b>musictag</b><span id="sub">유튜브 링크 하나로 태그까지</span></header>
+<div class="card err hide" id="dead" style="border:1px solid var(--accent)"></div>
 
 <div class="seg" role="tablist">
   <button role="tab" id="tab-add" aria-selected="true" onclick="tab('add')">추가</button>
@@ -590,9 +591,11 @@ details[open] summary::after{content:" ⌃"}
   <div class="card" id="c-url">
     <h2>유튜브 링크</h2>
     <input id="url" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
-           placeholder="붙여넣기만 하면 됩니다">
-    <button class="go" id="btn-get" onclick="start()">가져오기</button>
-    <p class="hint">공백, 따옴표, <code>?si=</code> 같은 꼬리표는 알아서 지웁니다.</p>
+           placeholder="유튜브에서 복사한 링크">
+    <button class="go" id="btn-paste" onclick="pasteAndGo()">클립보드에서 붙여넣고 시작</button>
+    <button class="go ghost" id="btn-get" onclick="start()">입력한 링크로 시작</button>
+    <p class="hint">유튜브 앱에서 <b>공유 → 링크 복사</b> 후 위 버튼만 누르면 됩니다.
+      공백, 따옴표, <code>?si=</code> 같은 꼬리표는 알아서 지웁니다.</p>
     <p class="err hide" id="e-url"></p>
   </div>
 
@@ -672,11 +675,41 @@ const FIELDS = [['title','제목',1],['artist','아티스트',1],['album','앨�
   ['track','트랙',0],['composer','작곡가',0],['comment','코멘트',0]];
 let job = null, chosen = null, covMode = 'itunes', covData = null, editing = null, eCov;
 
-async function api(path, body) {
+const DEAD = 'a-Shell이 응답하지 않습니다. a-Shell을 화면에 띄워 두세요 — '
+  + 'Safari와 a-Shell을 Split View로 나란히 두면 됩니다. '
+  + '홈 화면 아이콘만 눌러 여는 방식으로는 동작하지 않습니다.';
+
+async function api(path, body, ms = 15000) {
   const url = path + (path.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(K);
-  const r = await fetch(url, body ? {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)} : {});
-  return r.json();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, Object.assign({signal: ctl.signal},
+      body ? {method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(body)} : {}));
+    const data = await r.json();
+    show('#dead', false);
+    return data;
+  } catch (e) {
+    const msg = e.name === 'AbortError' ? DEAD
+      : '서버와 연결이 끊어졌습니다. a-Shell에서 musictag_app.py가 돌고 있는지 확인하세요.';
+    $('#dead').textContent = msg; show('#dead', true);
+    return {error: msg};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function pasteAndGo() {
+  try {
+    const text = (await navigator.clipboard.readText() || '').trim();
+    if (!text) return toast('클립보드가 비어 있습니다. 유튜브에서 링크를 복사해 주세요.');
+    $('#url').value = text;
+    start();
+  } catch (e) {
+    toast('붙여넣기 권한이 없습니다. 위 칸을 길게 눌러 직접 붙여넣어 주세요.');
+    $('#url').focus();
+  }
 }
 function toast(msg) {
   const t = document.createElement('div');
@@ -806,7 +839,7 @@ function upload(input) {
 async function save() {
   err('#e-save', ''); $('#btn-save').disabled = true;
   const r = await api('/api/save', {job, meta: collect('form', chosen || {}),
-    lyrics: $('#lyrics').value, cover: {mode: covMode, data: covData}});
+    lyrics: $('#lyrics').value, cover: {mode: covMode, data: covData}}, 200000);
   $('#btn-save').disabled = false; $('#btn-save').textContent = '저장';
   if (r.error) return err('#e-save', r.error + (r.detail ? ' (' + r.detail + ')' : ''));
   if (r.warn) toast(r.warn);
@@ -861,6 +894,15 @@ async function edel() {
   toast('삭제했습니다'); show('#c-edit', false); loadLib();
 }
 cover('itunes');
+
+// 단축어(Shortcuts)가 ?url=... 로 열면 곧바로 시작한다
+(function () {
+  const pre = new URLSearchParams(location.search).get('url');
+  if (!pre) return;
+  $('#url').value = pre;
+  history.replaceState(null, '', location.pathname + '?k=' + encodeURIComponent(K));
+  start();
+})();
 </script></body></html>"""
 
 if __name__ == "__main__":
