@@ -28,6 +28,25 @@ def test_clean_url(raw, want):
     assert m.clean_url(raw) == want
 
 
+@pytest.mark.parametrize(("raw", "want"), [
+    # 단축어에서 한 겹 인코딩된 채 도착
+    ("https%3A%2F%2Fyoutu.be%2FGM2I0OzVS3o%3Fsi%3DCXHgR6ombGTZN4qV",
+     "https://youtu.be/GM2I0OzVS3o"),
+    # 두 겹 인코딩된 채 도착
+    ("https%253A%252F%252Fyoutu.be%252FGM2I0OzVS3o", "https://youtu.be/GM2I0OzVS3o"),
+    # 인코딩 안 된 보통 링크는 그대로
+    ("https://youtu.be/GM2I0OzVS3o", "https://youtu.be/GM2I0OzVS3o"),
+])
+def test_clean_url_decodes_shortcut_encoding(raw, want):
+    assert m.clean_url(raw) == want
+
+
+def test_clean_url_leaves_unrelated_percent_alone():
+    """'://'가 인코딩돼 있지 않으면 %는 건드리지 않는다."""
+    url = "https://www.youtube.com/watch?v=AAAAAAAAAAA&q=a%2Bb"
+    assert m.clean_url(url) == url
+
+
 def test_clean_lyrics_strips_zero_width_and_trailing_space():
     raw = "1，​\r\n두   \r\n﻿셋   \n\n"
     assert m.clean_lyrics(raw) == "1，\n두\n셋"

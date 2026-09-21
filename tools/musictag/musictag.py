@@ -35,6 +35,7 @@ FIELDS = [("title", "제목"), ("artist", "아티스트"), ("album_artist", "앨
 MP4KEYS = {"title": "\xa9nam", "artist": "\xa9ART", "album_artist": "aART",
            "album": "\xa9alb", "date": "\xa9day", "genre": "\xa9gen",
            "composer": "\xa9wrt", "comment": "\xa9cmt", "lyrics": "\xa9lyr"}
+ENCODED_SCHEME = re.compile(r"%(?:25)*3a(?:%(?:25)*2f){2}", re.I)  # 인코딩된 '://'
 NOISE = re.compile(r"\[[^\]]*\]|\([^)]*\)|【[^】]*】|[「」『』《》]")
 WORDS = re.compile(r"(?i)\b(official|music\s*video|mv|m/v|lyrics?|audio|hd|4k|"
                    r"full\s*ver\.?|live|teaser|가사|공식|뮤직비디오)\b")
@@ -92,10 +93,23 @@ def check_link(url):
             "설명서의 예시(xxxxxxxx)가 아니라, 유튜브 앱에서 '공유 → 복사'한 "
             "진짜 링크를 넣으세요. 영상 ID는 11글자입니다.")
 
+def undo_percent(text):
+    """단축어(Shortcuts)에서 %3A%2F%2F 처럼 인코딩된 채 도착한 링크를 되돌린다.
+
+    인코딩이 몇 겹인지는 a-Shell 버전마다 다를 수 있어, '://'가 보일 때까지
+    푼다. 인코딩된 '://'가 없으면 건드리지 않는다.
+    """
+    for _ in range(3):
+        if not ENCODED_SCHEME.search(text):
+            return text
+        text = urllib.parse.unquote(text)
+    return text
+
 def clean_url(raw):
     """앞뒤 공백/휘어진 따옴표와 ?si= 같은 추적 파라미터 제거."""
     s = unicodedata.normalize("NFKC", raw or "")
     s = "".join(c for c in s if c not in QUOTES and not c.isspace()).translate(ZW)
+    s = undo_percent(s)
     if not s:
         return ""
     p = urllib.parse.urlsplit(s)
