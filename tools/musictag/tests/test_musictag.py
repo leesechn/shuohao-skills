@@ -450,6 +450,17 @@ def test_progress_hook_prints_percent(capsys):
     m.progress({"status": "finished"})
 
 
+def test_unexpected_error_shows_type_and_message(monkeypatch, capsys):
+    """메시지만 보고도 원인을 좁힐 수 있어야 한다."""
+    def boom(*a, **k):
+        raise ValueError("뭔가 터짐")
+
+    monkeypatch.setattr(m, "cmd_download", boom)
+    assert m.main([]) == 1
+    out = capsys.readouterr().out
+    assert "[ValueError]" in out and "뭔가 터짐" in out
+
+
 def test_main_rejects_unknown_command(capsys):
     assert m.main(["bogus"]) == 1
     assert "알 수 없는 명령" in capsys.readouterr().out

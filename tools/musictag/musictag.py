@@ -469,7 +469,9 @@ def main(argv=None):
     except SystemExit as exc:
         return int(exc.code or 0)
     except Exception as exc:  # noqa: BLE001
-        fail("예상치 못한 문제가 생겼습니다.", "--debug를 붙여 다시 실행하면 자세히 보입니다.", exc)
+        # 메시지만 보고도 원인을 좁힐 수 있게 예외 종류와 내용을 함께 보여준다
+        fail(f"예상치 못한 문제가 생겼습니다. [{type(exc).__name__}] {exc}",
+             "--debug를 붙여 다시 실행하면 어느 줄인지까지 보입니다.", exc)
         return 1
     return 0
 
