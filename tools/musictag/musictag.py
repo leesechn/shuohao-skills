@@ -35,6 +35,8 @@ FIELDS = [("title", "제목"), ("artist", "아티스트"), ("album_artist", "앨
 MP4KEYS = {"title": "\xa9nam", "artist": "\xa9ART", "album_artist": "aART",
            "album": "\xa9alb", "date": "\xa9day", "genre": "\xa9gen",
            "composer": "\xa9wrt", "comment": "\xa9cmt", "lyrics": "\xa9lyr"}
+ANY_URL = re.compile(r"https?://[^\s\"'<>\\]+")
+YT_URL = re.compile(r"https?://(?:www\.|m\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}")
 SCHEME = re.compile(r"[a-z][a-z0-9+.\-]*://", re.I)
 ENCODED_SCHEME = re.compile(r"%(?:25)*3a(?:%(?:25)*2f){2}", re.I)  # 인코딩된 '://'
 NOISE = re.compile(r"\[[^\]]*\]|\([^)]*\)|【[^】]*】|[「」『』《》]")
@@ -117,7 +119,13 @@ def clean_url(raw):
     # 단축어에서 '//' 가 있으면 a-Shell이 명령을 거기서 끊기 때문에 떼고 넘긴다.
     if not SCHEME.match(s):
         s = "https://" + s.lstrip("/")
-    p = urllib.parse.urlsplit(s)
+    try:
+        p = urllib.parse.urlsplit(s)
+    except ValueError:
+        fail("링크를 알아볼 수 없습니다.",
+             "link.txt에 유튜브 주소 한 줄만 있어야 합니다. 단축어에서 '파일 저장' "
+             "바로 앞에 '텍스트' 동작이 있는지 확인하세요.")
+        return ""
     q = [(k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True)
          if k.lower() not in TRACKING]
     return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path, urllib.parse.urlencode(q), ""))
@@ -386,14 +394,21 @@ def progress(d):
     if total:
         print(f"\r받는 중 {min(99, int(done * 100 / total))}%", end="", flush=True)
 
-def first_line(path):
+def first_link(path, limit=200_000):
+    """파일에서 링크를 찾아낸다.
+
+    단축어의 '파일 저장'이 주소 대신 웹페이지 전체를 저장해 버리는 경우가 있어,
+    첫 줄이 링크가 아니면 본문에서 유튜브 주소를 찾아본다.
+    """
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.strip():
-                return line.strip()
+        text = path.read_text(encoding="utf-8", errors="replace")[:limit]
     except OSError:
-        pass
-    return ""
+        return ""
+    head = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if head and len(head) < 300 and ANY_URL.fullmatch(head):
+        return head
+    found = YT_URL.search(text) or ANY_URL.search(text)
+    return found.group(0) if found else head
 
 def read_link(arg):
     """인자가 링크가 담긴 텍스트 파일이면 첫 줄을 읽는다.
@@ -402,16 +417,16 @@ def read_link(arg):
     링크를 이 파일에 저장해 두면, 명령줄에 링크를 싣지 않아도 된다.
     """
     if not arg:
-        return first_line(DOCS / "link.txt")
+        return first_link(DOCS / "link.txt")
     path = Path(arg).expanduser()
     if path.suffix.lower() in (".txt", "") and path.is_file():
-        return first_line(path) or arg
+        return first_link(path) or arg
     return arg
 
 def cmd_download(countries=None, url=None, auto=False):
     if not url:
         # 단축어가 남겨 둔 링크 파일이 있으면 그걸 쓰고, 묻지 않는다
-        url, auto = first_line(DOCS / "link.txt"), True
+        url, auto = first_link(DOCS / "link.txt"), True
     url = clean_url(read_link(url) or ask("유튜브 링크를 붙여넣고 Enter", ""))
     if not url:
         die("링크가 비어 있습니다.", "다시 실행해 링크를 붙여넣으세요.")

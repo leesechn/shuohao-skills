@@ -369,6 +369,22 @@ def test_read_link_without_argument_falls_back(tmp_path, monkeypatch):
     assert m.read_link("") == "https://youtu.be/dQw4w9WgXcQ"
 
 
+def test_link_txt_with_saved_html_still_finds_the_link(tmp_path, monkeypatch):
+    """단축어의 '파일 저장'이 웹페이지를 통째로 저장해도 링크를 건져야 한다."""
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    (tmp_path / "link.txt").write_text(
+        '<!DOCTYPE html><html><head>[not a url]</head>'
+        '<script>var u="https://www.youtube.com/watch?v=GM2I0OzVS3o&pp=x";</script></html>',
+        encoding="utf-8")
+    assert m.read_link("") == "https://www.youtube.com/watch?v=GM2I0OzVS3o"
+
+
+def test_clean_url_survives_garbage(capsys):
+    """알아볼 수 없는 입력에 죽지 않고 원인을 말해야 한다."""
+    assert m.clean_url("<!DOCTYPE html>[broken") == ""
+    assert "\ub9c1\ud06c\ub97c \uc54c\uc544\ubcfc \uc218 \uc5c6\uc2b5\ub2c8\ub2e4" in capsys.readouterr().out
+
+
 def test_read_link_passes_through_plain_url():
     assert m.read_link("https://youtu.be/AAA") == "https://youtu.be/AAA"
 
