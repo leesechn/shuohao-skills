@@ -34,6 +34,9 @@ def test_clean_url(raw, want):
      "https://youtu.be/GM2I0OzVS3o"),
     # 두 겹 인코딩된 채 도착
     ("https%253A%252F%252Fyoutu.be%252FGM2I0OzVS3o", "https://youtu.be/GM2I0OzVS3o"),
+    # 네 겹까지도 되돌린다 (단축어 인코딩 횟수를 헷갈려도 동작하도록)
+    ("https%2525253A%2525252F%2525252Fyoutu.be%2525252FGM2I0OzVS3o",
+     "https://youtu.be/GM2I0OzVS3o"),
     # 인코딩 안 된 보통 링크는 그대로
     ("https://youtu.be/GM2I0OzVS3o", "https://youtu.be/GM2I0OzVS3o"),
 ])

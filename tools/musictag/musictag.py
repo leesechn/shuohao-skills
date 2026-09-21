@@ -100,7 +100,7 @@ def undo_percent(text):
     인코딩이 몇 겹인지는 a-Shell 버전마다 다를 수 있어, '://'가 보일 때까지
     푼다. 인코딩된 '://'가 없으면 건드리지 않는다.
     """
-    for _ in range(3):
+    for _ in range(5):
         if not ENCODED_SCHEME.search(text):
             return text
         text = urllib.parse.unquote(text)
