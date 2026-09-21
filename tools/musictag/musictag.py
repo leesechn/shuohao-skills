@@ -7,6 +7,8 @@
   python3 musictag.py edit            방금 넣은 음원의 태그 수정 (m4a/mp3)
   python3 musictag.py edit 곡.m4a     파일을 지정해서 수정
   python3 musictag.py show [곡.m4a]   태그 요약 출력
+  python3 musictag.py tags            태그를 tags.txt로 뽑기 (직접 고치기)
+  python3 musictag.py apply           tags.txt에 적은 대로 적용
   옵션: --debug (traceback), --country JP,KR,US
 """
 from __future__ import annotations
@@ -441,6 +443,92 @@ def pick_cover(meta):
         return b"", ""
     return None, ""
 
+TAGFILE = DOCS / "tags.txt"
+COVER_CHOICES = {"그대로": "keep", "앨범아트": "art", "cover.jpg": "file", "삭제": "none"}
+
+def cmd_tags(name=None):
+    """현재 태그를 tags.txt로 뽑는다. 사용자가 직접 고쳐 쓰라고."""
+    path = target(name)
+    meta = read_tags(path)
+    out = [f"파일: {path.name}",
+           "# 값을 고친 뒤 저장하고  python3 musictag.py apply  를 실행하세요.",
+           "# '#' 뒤는 설명이라 무시됩니다. 빈칸으로 두면 그 태그는 지워집니다.",
+           ""]
+    out += [f"{label}: {meta.get(key, '')}" for key, label in FIELDS]
+    out += [f"전체 트랙: {meta.get('track_total', '')}",
+            "커버: 그대로          # 그대로 / 앨범아트 / cover.jpg / 삭제",
+            "이름정리: y           # y면 '아티스트 - 제목'으로 바꿔 music/에 저장",
+            "",
+            "가사:                 # 아래 줄부터 끝까지가 가사입니다"]
+    out += ["  " + line for line in (meta.get("lyrics") or "").splitlines()]
+    TAGFILE.write_text("\n".join(out) + "\n", encoding="utf-8")
+    note(f"만들었습니다: {TAGFILE}")
+    note("고친 뒤  python3 musictag.py apply  를 실행하세요.")
+
+def parse_tagfile(text):
+    """tags.txt를 meta / 가사 / 설정으로 나눈다."""
+    labels = {label: key for key, label in FIELDS}
+    labels["전체 트랙"] = "track_total"
+    meta, lyrics, opts, in_lyrics = {}, [], {}, False
+    for line in text.splitlines():
+        if in_lyrics:
+            lyrics.append(line[2:] if line.startswith("  ") else line)
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        label, sep, value = line.partition(":")
+        if not sep:
+            continue
+        label, value = label.strip(), value.strip()
+        if label == "가사":
+            in_lyrics = True
+        elif label in labels:
+            meta[labels[label]] = value
+        elif label in ("커버", "이름정리", "파일"):
+            opts[label] = value.split("#")[0].strip()
+    return meta, "\n".join(lyrics).strip("\n"), opts
+
+def cover_from_choice(choice, meta, countries=None):
+    """tags.txt의 '커버:' 값에 따라 커버를 준비한다."""
+    mode = COVER_CHOICES.get(choice.strip().lower().replace(" ", ""), "keep")
+    if mode == "keep":
+        return None, ""
+    if mode == "none":
+        return b"", ""
+    if mode == "file":
+        return get_cover({})
+    results, _ = itunes_search(build_query(f"{meta.get('artist', '')} "
+                                           f"{meta.get('title', '')}"), countries)
+    art = meta_from_result(results[0])["artwork"] if results else ""
+    if not art:
+        fail("앨범 아트를 찾지 못했습니다.", "커버는 그대로 둡니다.")
+        return None, ""
+    return get_cover({"artwork": art}, "", local=False)
+
+def cmd_apply(countries=None):
+    """tags.txt에 적은 대로 적용한다."""
+    if not TAGFILE.exists():
+        die("tags.txt가 없습니다.", "먼저  python3 musictag.py tags  를 실행하세요.")
+    meta, lyrics, opts = parse_tagfile(TAGFILE.read_text(encoding="utf-8", errors="replace"))
+    path = resolve(opts["파일"]) if opts.get("파일") else target(None)
+    if meta.get("track") and not str(meta["track"]).isdigit():
+        note("트랙 번호가 숫자가 아니라 비워 둡니다.")
+        meta["track"] = ""
+    cover, kind = cover_from_choice(opts.get("커버", "그대로"), meta, countries)
+    try:
+        write_tags(path, meta, cover, kind, lyrics)
+    except Exception as exc:  # noqa: BLE001
+        die("태그를 쓰지 못했습니다.", "m4a 또는 mp3 파일인지 확인하세요.", exc)
+    if opts.get("이름정리", "y").lower().startswith("y"):
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        dest = unique_path(OUT_DIR,
+                           safe_filename(meta.get("artist", ""), meta.get("title", "")),
+                           path.suffix.lower())
+        if dest != path:
+            path.replace(dest)
+            path = dest
+    note(f"완료: {path}")
+
 def cmd_edit(name=None, countries=None):
     path = target(name)
     meta = read_tags(path)
@@ -588,7 +676,11 @@ def main(argv=None):
         del args[i:i + 2]
     try:
         cmd = args[0] if args else ""
-        if cmd == "show":
+        if cmd == "tags":
+            cmd_tags(args[1] if len(args) > 1 else None)
+        elif cmd == "apply":
+            cmd_apply(countries)
+        elif cmd == "show":
             cmd_show(args[1] if len(args) > 1 else None)
         elif cmd == "edit":
             cmd_edit(args[1] if len(args) > 1 else None, countries)
@@ -597,7 +689,7 @@ def main(argv=None):
             cmd_download(countries, url=cmd, auto=not ask_mode)
         elif cmd:
             die(f"알 수 없는 명령 '{cmd}'.",
-                "사용법: python3 musictag.py [링크 | edit 곡.m4a | show 곡.m4a]")
+                "사용법: musictag.py [링크 | edit | tags | apply | show]")
         else:
             cmd_download(countries)
     except KeyboardInterrupt:

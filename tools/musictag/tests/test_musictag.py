@@ -223,6 +223,71 @@ def test_target_errors_without_any_audio(tmp_path, monkeypatch, capsys):
     assert "\ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4" in capsys.readouterr().out
 
 
+# ------------------------------------------------------------ 수기 편집 (tags.txt)
+def _setup_tagfile(tmp_path, monkeypatch, silent_m4a):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    monkeypatch.setattr(m, "OUT_DIR", tmp_path / "music")
+    monkeypatch.setattr(m, "TAGFILE", tmp_path / "tags.txt")
+    song = tmp_path / "\uc5b4\ub5a4\ub178\ub798.m4a"
+    song.write_bytes(silent_m4a.read_bytes())
+    m.write_tags(song, dict.fromkeys([k for k, _ in m.FIELDS], ""), None, "", "\uae30\uc874 \uac00\uc0ac")
+    return song
+
+
+def test_tags_export_then_apply_roundtrip(tmp_path, monkeypatch, silent_m4a):
+    song = _setup_tagfile(tmp_path, monkeypatch, silent_m4a)
+    m.cmd_tags(song.name)
+
+    text = m.TAGFILE.read_text(encoding="utf-8")
+    assert f"\ud30c\uc77c: {song.name}" in text and "\uac00\uc0ac:" in text
+    text = (text.replace("\uc81c\ubaa9: ", "\uc81c\ubaa9: \ub0b4\uac00 \uc4f4 \uc81c\ubaa9")
+                .replace("\uc544\ud2f0\uc2a4\ud2b8: ", "\uc544\ud2f0\uc2a4\ud2b8: \ub0b4\uac00 \uc4f4 \uac00\uc218")
+                .replace("\ud2b8\ub799 \ubc88\ud638: ", "\ud2b8\ub799 \ubc88\ud638: 3")
+                .replace("  \uae30\uc874 \uac00\uc0ac", "  \uccab \uc904\n  \ub458\uc9f8 \uc904"))
+    m.TAGFILE.write_text(text, encoding="utf-8")
+
+    m.cmd_apply()
+    saved = next((tmp_path / "music").glob("*.m4a"))
+    assert saved.name == "\ub0b4\uac00_\uc4f4_\uac00\uc218_-_\ub0b4\uac00_\uc4f4_\uc81c\ubaa9.m4a"
+    got = m.read_tags(saved)
+    assert got["title"] == "\ub0b4\uac00 \uc4f4 \uc81c\ubaa9" and got["artist"] == "\ub0b4\uac00 \uc4f4 \uac00\uc218"
+    assert got["track"] == "3"
+    assert got["lyrics"] == "\uccab \uc904\n\ub458\uc9f8 \uc904"
+
+
+def test_apply_without_tagfile_errors(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m, "TAGFILE", tmp_path / "tags.txt")
+    with pytest.raises(SystemExit):
+        m.cmd_apply()
+    assert "tags.txt" in capsys.readouterr().out
+
+
+def test_parse_tagfile_ignores_comments_and_blank_lines():
+    meta, lyrics, opts = m.parse_tagfile(
+        "\ud30c\uc77c: a.m4a\n# \uc124\uba85\n\n\uc81c\ubaa9: \uacf2\n\ucee4\ubc84: \uc0ad\uc81c   # \uc8fc\uc11d\n\uac00\uc0ac:\n  \ud55c \uc904\n")
+    assert meta["title"] == "\uacf2" and opts["\ucee4\ubc84"] == "\uc0ad\uc81c"
+    assert opts["\ud30c\uc77c"] == "a.m4a" and lyrics == "\ud55c \uc904"
+
+
+@pytest.mark.parametrize(("choice", "want"), [
+    ("\uadf8\ub300\ub85c", None), ("\uc0ad\uc81c", b""),
+])
+def test_cover_choice_keep_and_delete(choice, want):
+    assert m.cover_from_choice(choice, {})[0] == want
+
+
+def test_cover_choice_album_art(monkeypatch):
+    monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(m, "get_cover", lambda *a, **k: (b"\xff\xd8\xffIMG", "jpeg"))
+    assert m.cover_from_choice("\uc568\ubc94\uc544\ud2b8", {"artist": "A", "title": "S"})[0] == b"\xff\xd8\xffIMG"
+
+
+def test_cover_choice_album_art_not_found(monkeypatch, capsys):
+    monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([], ""))
+    assert m.cover_from_choice("\uc568\ubc94\uc544\ud2b8", {"artist": "A", "title": "S"}) == (None, "")
+    assert "\ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4" in capsys.readouterr().out
+
+
 # ------------------------------------------------------------ 커버 / 가사 파일
 def test_get_cover_prefers_local_file(tmp_path, monkeypatch):
     (tmp_path / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 8)
