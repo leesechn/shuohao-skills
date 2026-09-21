@@ -69,7 +69,7 @@ def is_link(text):
     t = (text or "").strip().strip(QUOTES)
     if t.startswith(("http://", "https://")) or "youtu" in t.lower():
         return True
-    path = Path(t)
+    path = Path(t).expanduser()
     return bool(t) and path.suffix.lower() == ".txt" and path.is_file()
 
 def video_id(url):
@@ -386,16 +386,32 @@ def progress(d):
     if total:
         print(f"\r받는 중 {min(99, int(done * 100 / total))}%", end="", flush=True)
 
-def read_link(arg):
-    """인자가 링크가 담긴 텍스트 파일이면 첫 줄을 읽는다."""
-    path = Path(arg or "")
-    if arg and path.suffix.lower() in (".txt", "") and path.is_file():
+def first_line(path):
+    try:
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             if line.strip():
                 return line.strip()
+    except OSError:
+        pass
+    return ""
+
+def read_link(arg):
+    """인자가 링크가 담긴 텍스트 파일이면 첫 줄을 읽는다.
+
+    인자가 아예 없으면 ~/Documents/link.txt를 본다. 단축어(Shortcuts)가
+    링크를 이 파일에 저장해 두면, 명령줄에 링크를 싣지 않아도 된다.
+    """
+    if not arg:
+        return first_line(DOCS / "link.txt")
+    path = Path(arg).expanduser()
+    if path.suffix.lower() in (".txt", "") and path.is_file():
+        return first_line(path) or arg
     return arg
 
 def cmd_download(countries=None, url=None, auto=False):
+    if not url:
+        # 단축어가 남겨 둔 링크 파일이 있으면 그걸 쓰고, 묻지 않는다
+        url, auto = first_line(DOCS / "link.txt"), True
     url = clean_url(read_link(url) or ask("유튜브 링크를 붙여넣고 Enter", ""))
     if not url:
         die("링크가 비어 있습니다.", "다시 실행해 링크를 붙여넣으세요.")

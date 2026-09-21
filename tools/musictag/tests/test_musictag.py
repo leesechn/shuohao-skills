@@ -334,6 +334,41 @@ def test_read_link_from_text_file(tmp_path):
     assert m.is_link(str(f)) is True
 
 
+def test_link_txt_is_used_without_any_argument(tmp_path, monkeypatch, silent_m4a):
+    """단축어가 link.txt만 남겨도, 인자 없이 실행해 질문 없이 저장돼야 한다."""
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    monkeypatch.setattr(m, "OUT_DIR", tmp_path / "music")
+    monkeypatch.setattr(m, "TMP_DIR", tmp_path / "tmp")
+    monkeypatch.setattr(m, "ask", lambda *a, **k: pytest.fail("질문이 나왔다"))
+    monkeypatch.setattr(m, "itunes_search", lambda *a, **k: ([SAMPLE], "JP"))
+    monkeypatch.setattr(m, "get_cover", lambda *a, **k: (None, ""))
+    (tmp_path / "link.txt").write_text(
+        "https://youtu.be/dQw4w9WgXcQ?si=abc\n", encoding="utf-8")
+
+    def fake_download(url, hooks=None):
+        assert url == "https://youtu.be/dQw4w9WgXcQ"
+        dest = tmp_path / "tmpaudio.m4a"
+        dest.write_bytes(silent_m4a.read_bytes())
+        return dest, {"title": "Artist - Song", "uploader": "Chan", "id": "dQw4w9WgXcQ"}
+
+    monkeypatch.setattr(m, "download", fake_download)
+    assert m.main([]) == 0
+    assert (tmp_path / "music" / "Artist_-_Song.m4a").exists()
+
+
+def test_link_txt_path_as_argument(tmp_path, monkeypatch):
+    f = tmp_path / "link.txt"
+    f.write_text("https://youtu.be/dQw4w9WgXcQ\n", encoding="utf-8")
+    assert m.read_link(str(f)) == "https://youtu.be/dQw4w9WgXcQ"
+
+
+def test_read_link_without_argument_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    assert m.read_link("") == ""
+    (tmp_path / "link.txt").write_text("\n  https://youtu.be/dQw4w9WgXcQ  \n", encoding="utf-8")
+    assert m.read_link("") == "https://youtu.be/dQw4w9WgXcQ"
+
+
 def test_read_link_passes_through_plain_url():
     assert m.read_link("https://youtu.be/AAA") == "https://youtu.be/AAA"
 
