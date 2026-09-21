@@ -35,6 +35,7 @@ FIELDS = [("title", "제목"), ("artist", "아티스트"), ("album_artist", "앨
 MP4KEYS = {"title": "\xa9nam", "artist": "\xa9ART", "album_artist": "aART",
            "album": "\xa9alb", "date": "\xa9day", "genre": "\xa9gen",
            "composer": "\xa9wrt", "comment": "\xa9cmt", "lyrics": "\xa9lyr"}
+SCHEME = re.compile(r"[a-z][a-z0-9+.\-]*://", re.I)
 ENCODED_SCHEME = re.compile(r"%(?:25)*3a(?:%(?:25)*2f){2}", re.I)  # 인코딩된 '://'
 NOISE = re.compile(r"\[[^\]]*\]|\([^)]*\)|【[^】]*】|[「」『』《》]")
 WORDS = re.compile(r"(?i)\b(official|music\s*video|mv|m/v|lyrics?|audio|hd|4k|"
@@ -112,6 +113,10 @@ def clean_url(raw):
     s = undo_percent(s)
     if not s:
         return ""
+    # 'youtu.be/ID' 처럼 http:// 가 없는 링크도 받는다.
+    # 단축어에서 '//' 가 있으면 a-Shell이 명령을 거기서 끊기 때문에 떼고 넘긴다.
+    if not SCHEME.match(s):
+        s = "https://" + s.lstrip("/")
     p = urllib.parse.urlsplit(s)
     q = [(k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True)
          if k.lower() not in TRACKING]

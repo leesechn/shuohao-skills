@@ -41,6 +41,20 @@ def test_clean_url_decodes_shortcut_encoding(raw, want):
     assert m.clean_url(raw) == want
 
 
+@pytest.mark.parametrize(("raw", "want"), [
+    # 단축어가 '//' 때문에 잘리지 않게 https:// 를 떼고 넘긴 경우
+    ("youtu.be/GM2I0OzVS3o?si=UrXVbFqLb932C3f5", "https://youtu.be/GM2I0OzVS3o"),
+    ("www.youtube.com/watch?v=GM2I0OzVS3o&t=5", "https://www.youtube.com/watch?v=GM2I0OzVS3o&t=5"),
+    ("//youtu.be/GM2I0OzVS3o", "https://youtu.be/GM2I0OzVS3o"),
+])
+def test_clean_url_adds_missing_scheme(raw, want):
+    assert m.clean_url(raw) == want
+
+
+def test_scheme_less_link_passes_check(capsys):
+    assert m.check_link(m.clean_url("youtu.be/GM2I0OzVS3o")) is None
+
+
 def test_clean_url_leaves_unrelated_percent_alone():
     """'://'가 인코딩돼 있지 않으면 %는 건드리지 않는다."""
     url = "https://www.youtube.com/watch?v=AAAAAAAAAAA&q=a%2Bb"
