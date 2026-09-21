@@ -169,6 +169,60 @@ def test_non_numeric_track_is_dropped(silent_m4a):
     assert "trkn" not in MP4(str(silent_m4a)).tags
 
 
+# ------------------------------------------------------------ mp3 (ID3)
+def test_mp3_write_then_read(silent_mp3):
+    m.write_tags(silent_mp3, FULL, b"\xff\xd8\xff" + b"\x00" * 32, "jpeg", "1\ub9c8\ub514\n2\ub9c8\ub514")
+    got = m.read_tags(silent_mp3)
+    for key, want in FULL.items():
+        assert got[key] == want, key
+    assert got["lyrics"] == "1\ub9c8\ub514\n2\ub9c8\ub514" and got["has_cover"] is True
+
+
+def test_mp3_is_detected_by_extension(silent_mp3, silent_m4a):
+    assert m.is_mp3(silent_mp3) is True
+    assert m.is_mp3(silent_m4a) is False
+
+
+@pytest.mark.parametrize("fixture", ["silent_m4a", "silent_mp3"])
+def test_cover_none_keeps_and_empty_deletes(fixture, request):
+    path = request.getfixturevalue(fixture)
+    m.write_tags(path, FULL, b"\xff\xd8\xff" + b"\x00" * 32, "jpeg", "\uac00\uc0ac")
+    m.write_tags(path, FULL, None, "", None)          # 그대로
+    assert m.read_tags(path)["has_cover"] is True
+    m.write_tags(path, FULL, b"", "", None)           # 삭제
+    got = m.read_tags(path)
+    assert got["has_cover"] is False and got["lyrics"] == "\uac00\uc0ac"
+
+
+def test_newest_audio_picks_latest(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    (tmp_path / "old.m4a").write_bytes(b"x")
+    (tmp_path / "new.mp3").write_bytes(b"y")
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    os.utime(tmp_path / "old.m4a", (1, 1))
+    assert m.newest_audio().name == "new.mp3"
+
+
+def test_newest_audio_none_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    assert m.newest_audio() is None
+
+
+def test_target_without_name_uses_newest(tmp_path, monkeypatch, silent_m4a):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    dest = tmp_path / "shared.m4a"
+    dest.write_bytes(silent_m4a.read_bytes())
+    assert m.target(None) == dest
+
+
+def test_target_errors_without_any_audio(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    with pytest.raises(SystemExit):
+        m.target(None)
+    assert "\ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4" in capsys.readouterr().out
+
+
 # ------------------------------------------------------------ 커버 / 가사 파일
 def test_get_cover_prefers_local_file(tmp_path, monkeypatch):
     (tmp_path / "cover.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 8)

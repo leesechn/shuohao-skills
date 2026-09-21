@@ -4,8 +4,9 @@
   python3 musictag.py <링크>          묻지 않고 바로 저장 (가장 빠름)
   python3 musictag.py <링크> --ask    항목을 하나씩 확인하며 저장
   python3 musictag.py                 링크를 물어본 뒤 하나씩 확인
-  python3 musictag.py edit 곡.m4a     기존 파일 태그 수정
-  python3 musictag.py show 곡.m4a     태그 요약 출력
+  python3 musictag.py edit            방금 넣은 음원의 태그 수정 (m4a/mp3)
+  python3 musictag.py edit 곡.m4a     파일을 지정해서 수정
+  python3 musictag.py show [곡.m4a]   태그 요약 출력
   옵션: --debug (traceback), --country JP,KR,US
 """
 from __future__ import annotations
@@ -279,7 +280,68 @@ def take_lyrics(docs=None):
     note(f"가사: lyrics.txt {len(text.splitlines())}줄 삽입")
     return text
 
+AUDIO_EXT = (".m4a", ".mp4", ".m4b", ".mp3")
+ID3TEXT = {"title": "TIT2", "artist": "TPE1", "album_artist": "TPE2", "album": "TALB",
+           "date": "TDRC", "genre": "TCON", "composer": "TCOM"}
+
+def is_mp3(path):
+    return str(path).lower().endswith(".mp3")
+
+def mp3_tags(path):
+    from mutagen.id3 import ID3, ID3NoHeaderError
+    try:
+        return ID3(str(path))
+    except ID3NoHeaderError:
+        return ID3()
+
+def mp3_write(path, meta, cover, cover_kind, lyrics):
+    """mp3는 ID3 프레임에 쓴다. m4a와 같은 항목을 다룬다."""
+    import mutagen.id3 as id3
+    tags = mp3_tags(path)
+    for key, fid in ID3TEXT.items():
+        if key not in meta:
+            continue
+        tags.delall(fid)
+        val = str(meta.get(key) or "")
+        if val:
+            tags.add(getattr(id3, fid)(encoding=3, text=val))
+    if "comment" in meta:
+        tags.delall("COMM")
+        if meta.get("comment"):
+            tags.add(id3.COMM(encoding=3, lang="kor", desc="", text=str(meta["comment"])))
+    if lyrics is not None:
+        tags.delall("USLT")
+        if lyrics:
+            tags.add(id3.USLT(encoding=3, lang="kor", desc="", text=lyrics))
+    track, total = str(meta.get("track") or ""), str(meta.get("track_total") or "")
+    tags.delall("TRCK")
+    if track.isdigit():
+        tags.add(id3.TRCK(encoding=3, text=f"{track}/{total}" if total.isdigit() else track))
+    if cover is not None:
+        tags.delall("APIC")
+        if cover:
+            mime = "image/png" if cover_kind == "png" else "image/jpeg"
+            tags.add(id3.APIC(encoding=3, mime=mime, type=3, desc="", data=cover))
+    tags.save(str(path), v2_version=3)
+
+def mp3_read(path):
+    tags = mp3_tags(path)
+    meta = {k: (str(tags.get(fid)) if tags.get(fid) else "") for k, fid in ID3TEXT.items()}
+    comm = tags.getall("COMM")
+    meta["comment"] = str(comm[0]) if comm else ""
+    uslt = tags.getall("USLT")
+    meta["lyrics"] = str(uslt[0]) if uslt else ""
+    trck = str(tags.get("TRCK") or "")
+    num, _, total = trck.partition("/")
+    meta["track"] = num if num.isdigit() else ""
+    meta["track_total"] = total if total.isdigit() else ""
+    meta["has_cover"] = bool(tags.getall("APIC"))
+    return meta
+
 def write_tags(path, meta, cover=None, cover_kind="jpeg", lyrics=None):
+    """cover: None=그대로, b""=삭제, 바이트=교체."""
+    if is_mp3(path):
+        return mp3_write(path, meta, cover, cover_kind, lyrics)
     from mutagen.mp4 import MP4, MP4Cover
     audio = MP4(str(path))
     if audio.tags is None:
@@ -303,9 +365,13 @@ def write_tags(path, meta, cover=None, cover_kind="jpeg", lyrics=None):
     if cover:
         fmt = MP4Cover.FORMAT_PNG if cover_kind == "png" else MP4Cover.FORMAT_JPEG
         tags["covr"] = [MP4Cover(cover, imageformat=fmt)]
+    elif cover is not None and "covr" in tags:
+        del tags["covr"]
     audio.save()
 
 def read_tags(path):
+    if is_mp3(path):
+        return mp3_read(path)
     from mutagen.mp4 import MP4
     tags = MP4(str(path)).tags or {}
     meta = {k: (tags.get(v, [""])[0] if tags.get(v) else "") for k, v in MP4KEYS.items()}
@@ -322,22 +388,78 @@ def resolve(name):
     die(f"'{name}' 파일을 찾을 수 없습니다.",
         "~/Documents 또는 ~/Documents/music 안의 파일명을 확인하세요.")
 
-def cmd_show(name):
-    meta = read_tags(resolve(name))
+def newest_audio(folder=None):
+    """폴더에 방금 넣은 음원을 찾는다(단축어로 공유한 파일)."""
+    folder = folder or DOCS
+    files = [f for f in folder.glob("*") if f.suffix.lower() in AUDIO_EXT and f.is_file()]
+    return max(files, key=lambda f: f.stat().st_mtime, default=None)
+
+def target(name):
+    """파일명을 주면 그것, 안 주면 ~/Documents에 가장 최근에 들어온 음원."""
+    if name:
+        return resolve(name)
+    found = newest_audio()
+    if not found:
+        die("고칠 음원을 찾지 못했습니다.",
+            "단축어로 음원을 공유했는지, 또는 파일명을 함께 입력했는지 확인하세요.")
+    note(f"대상: {found.name}")
+    return found
+
+def show_tags(meta):
     for key, label in FIELDS:
         note(f"{label}: {meta.get(key) or '-'}")
     lines = (meta.get("lyrics") or "").splitlines()
     note(f"가사: {lines[0] if lines else '-'} ... (총 {len(lines)}줄)")
     note("커버: " + ("있음" if meta.get("has_cover") else "없음"))
 
-def cmd_edit(name):
-    path = resolve(name)
-    cmd_show(name)
-    meta = confirm_meta(read_tags(path))
-    cover, kind = (None, "")
-    if ask("커버를 교체할까요? (y/n)", "n").lower().startswith("y"):
-        cover, kind = get_cover({})
-    write_tags(path, meta, cover, kind, take_lyrics() or None)
+def cmd_show(name=None):
+    show_tags(read_tags(target(name)))
+
+def fill_from_itunes(meta, path, countries=None):
+    """현재 태그나 파일명으로 iTunes를 찾아 빈칸을 채운다."""
+    hint = build_query(f"{meta.get('artist', '')} {meta.get('title', '')}".strip()
+                       or path.stem.replace("_", " "))
+    query = ask("iTunes에서 곡 정보를 찾을 검색어 (Enter=건너뛰기)", hint)
+    if not query or query == hint and ask("이 검색어로 찾을까요? (y/n)", "y").lower() != "y":
+        return meta
+    found = choose_meta(query, meta.get("title", ""), meta.get("artist", ""), countries)
+    for key in ("title", "artist", "album_artist", "album", "date", "genre",
+                "track", "track_total"):
+        if found.get(key):
+            meta[key] = found[key]
+    meta["artwork"] = found.get("artwork", "")
+    return meta
+
+def pick_cover(meta):
+    """a=앨범 아트, f=cover.jpg, d=삭제, Enter=그대로."""
+    choice = ask("커버 (a=앨범 아트 받기, f=cover.jpg 사용, d=삭제, Enter=그대로)", "").lower()
+    if choice == "a":
+        return get_cover(meta, "", local=False)
+    if choice == "f":
+        return get_cover({})
+    if choice == "d":
+        return b"", ""
+    return None, ""
+
+def cmd_edit(name=None, countries=None):
+    path = target(name)
+    meta = read_tags(path)
+    show_tags(meta)
+    meta = fill_from_itunes(meta, path, countries)
+    meta = confirm_meta(meta)
+    cover, kind = pick_cover(meta)
+    try:
+        write_tags(path, meta, cover, kind, take_lyrics() or None)
+    except Exception as exc:  # noqa: BLE001
+        die("태그를 쓰지 못했습니다.", "m4a 또는 mp3 파일인지 확인하세요.", exc)
+    if ask("파일 이름을 '아티스트 - 제목'으로 정리할까요? (y/n)", "y").lower().startswith("y"):
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        dest = unique_path(OUT_DIR,
+                           safe_filename(meta.get("artist", ""), meta.get("title", "")),
+                           path.suffix.lower())
+        if dest != path:
+            path.replace(dest)
+            path = dest
     note(f"완료: {path}")
 
 def download(url, hooks=None):
@@ -466,10 +588,10 @@ def main(argv=None):
         del args[i:i + 2]
     try:
         cmd = args[0] if args else ""
-        if cmd in ("show", "edit"):
-            if len(args) < 2:
-                die("파일명을 함께 입력하세요.", f"예: python3 musictag.py {cmd} 곡.m4a")
-            (cmd_show if cmd == "show" else cmd_edit)(args[1])
+        if cmd == "show":
+            cmd_show(args[1] if len(args) > 1 else None)
+        elif cmd == "edit":
+            cmd_edit(args[1] if len(args) > 1 else None, countries)
         elif is_link(cmd):
             # 링크를 붙여 넣으면 묻지 않고 바로 저장한다. --ask면 하나씩 확인
             cmd_download(countries, url=cmd, auto=not ask_mode)

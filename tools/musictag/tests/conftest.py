@@ -79,3 +79,11 @@ def imported_modules(source: str) -> set[str]:
     mods |= {(n.module or "").split(".")[0] for n in ast.walk(tree)
              if isinstance(n, ast.ImportFrom)}
     return mods
+
+
+@pytest.fixture()
+def silent_mp3(tmp_path: Path) -> Path:
+    """태그 시험용 최소 mp3(프레임 헤더 + 무음)."""
+    path = tmp_path / "silent.mp3"
+    path.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 2048)
+    return path
