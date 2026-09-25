@@ -223,6 +223,65 @@ def test_target_errors_without_any_audio(tmp_path, monkeypatch, capsys):
     assert "\ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4" in capsys.readouterr().out
 
 
+# ------------------------------------------------------------ 영상 받기
+def test_video_saves_to_video_folder(tmp_path, monkeypatch, silent_m4a, capsys):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    monkeypatch.setattr(m, "VIDEO_DIR", tmp_path / "video")
+    monkeypatch.setattr(m, "ask", lambda *a, **k: pytest.fail("\uc9c8\ubb38\uc774 \ub098\uc654\ub2e4"))
+
+    def fake(url, hooks=None):
+        assert url == "https://youtu.be/dQw4w9WgXcQ"
+        tmp = tmp_path / "tmpvideo.mp4"
+        tmp.write_bytes(silent_m4a.read_bytes())
+        return tmp, {"title": "\uc5b4\ub5a4/\uc601\uc0c1: 1\ud654", "uploader": "\ucc44\ub110", "height": 720}
+
+    monkeypatch.setattr(m, "download_video", fake)
+    assert m.main(["video", "https://youtu.be/dQw4w9WgXcQ?si=x"]) == 0
+    saved = next((tmp_path / "video").glob("*.mp4"))
+    assert saved.name == "\uc5b4\ub5a4_\uc601\uc0c1_1\ud654.mp4"
+    assert "720p" in capsys.readouterr().out
+
+
+def test_video_warns_when_low_resolution(tmp_path, monkeypatch, silent_m4a, capsys):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    monkeypatch.setattr(m, "VIDEO_DIR", tmp_path / "video")
+
+    def fake(url, hooks=None):
+        tmp = tmp_path / "tmpvideo.mp4"
+        tmp.write_bytes(silent_m4a.read_bytes())
+        return tmp, {"title": "T", "uploader": "U", "height": 360}
+
+    monkeypatch.setattr(m, "download_video", fake)
+    m.cmd_video("https://youtu.be/dQw4w9WgXcQ")
+    assert "ffmpeg" in capsys.readouterr().out
+
+
+def test_video_uses_link_txt(tmp_path, monkeypatch, silent_m4a):
+    monkeypatch.setattr(m, "DOCS", tmp_path)
+    monkeypatch.setattr(m, "VIDEO_DIR", tmp_path / "video")
+    monkeypatch.setattr(m, "ask", lambda *a, **k: pytest.fail("\uc9c8\ubb38\uc774 \ub098\uc654\ub2e4"))
+    (tmp_path / "link.txt").write_text("https://youtu.be/dQw4w9WgXcQ\n", encoding="utf-8")
+    seen = []
+
+    def fake(url, hooks=None):
+        seen.append(url)
+        tmp = tmp_path / "tmpvideo.mp4"
+        tmp.write_bytes(silent_m4a.read_bytes())
+        return tmp, {"title": "T", "uploader": "U", "height": 720}
+
+    monkeypatch.setattr(m, "download_video", fake)
+    assert m.main(["video"]) == 0
+    assert seen == ["https://youtu.be/dQw4w9WgXcQ"]
+
+
+def test_video_format_asks_for_combined_stream_only():
+    """ffmpeg가 없으니 영상+소리가 한 파일에 든 형식만 요청해야 한다."""
+    import inspect
+    src = inspect.getsource(m.download_video)
+    assert "acodec!=none" in src and "vcodec!=none" in src
+    assert "merge_output_format" not in src
+
+
 # ------------------------------------------------------------ 수기 편집 (tags.txt)
 def _setup_tagfile(tmp_path, monkeypatch, silent_m4a):
     monkeypatch.setattr(m, "DOCS", tmp_path)

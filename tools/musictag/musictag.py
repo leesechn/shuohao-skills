@@ -7,6 +7,7 @@
   python3 musictag.py edit            방금 넣은 음원의 태그 수정 (m4a/mp3)
   python3 musictag.py edit 곡.m4a     파일을 지정해서 수정
   python3 musictag.py show [곡.m4a]   태그 요약 출력
+  python3 musictag.py video [<링크>]  영상(mp4)으로 받기
   python3 musictag.py tags            태그를 tags.txt로 뽑기 (직접 고치기)
   python3 musictag.py apply           tags.txt에 적은 대로 적용
   옵션: --debug (traceback), --country JP,KR,US
@@ -633,6 +634,66 @@ def read_link(arg):
         return first_link(path) or arg
     return arg
 
+VIDEO_DIR = DOCS / "video"
+
+def download_video(url, hooks=None):
+    """영상+소리가 한 파일에 든 형식만 받는다.
+
+    ffmpeg가 없어 따로 받은 영상과 소리를 합칠 수 없다. 유튜브의 고화질은
+    대부분 영상만 따로 있는 형식이라, 받을 수 있는 건 보통 360p, 운이 좋으면 720p다.
+    """
+    try:
+        import yt_dlp
+    except ImportError as exc:
+        die("yt-dlp를 불러오지 못했습니다.",
+            "a-Shell에서 'pip install -U yt-dlp' 실행 후 다시 시도하세요.", exc)
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    for old_file in TMP_DIR.glob("tmpvideo*"):
+        old_file.unlink()
+    opts = {"format": "best[ext=mp4][acodec!=none][vcodec!=none]/"
+                      "best[acodec!=none][vcodec!=none]",
+            "noplaylist": True, "outtmpl": str(TMP_DIR / "tmpvideo.%(ext)s"),
+            "quiet": True, "no_warnings": True, "noprogress": True,
+            "progress_hooks": list(hooks or [])}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as exc:  # noqa: BLE001
+        text = str(exc).lower()
+        if "requested format" in text or "no video formats" in text:
+            die("영상과 소리가 한 파일에 든 형식이 없습니다.",
+                "ffmpeg 없이는 이 영상을 받을 수 없습니다. 음원만 받으려면 "
+                "'python3 musictag.py <링크>'를 쓰세요.", exc)
+        die("영상 다운로드에 실패했습니다.",
+            "'pip install -U yt-dlp'로 업데이트하거나 링크를 다시 확인하세요.", exc)
+    files = sorted(TMP_DIR.glob("tmpvideo*"))
+    if not files:
+        die("받은 파일을 찾지 못했습니다.", "링크를 확인하고 다시 실행하세요.")
+    return files[0], info
+
+def cmd_video(url=None):
+    url = clean_url(read_link(url) or ask("유튜브 링크를 붙여넣고 Enter", ""))
+    if not url:
+        die("링크가 비어 있습니다.", "다시 실행해 링크를 붙여넣으세요.")
+    check_link(url)
+    note("영상 다운로드 중...")
+    tmp, info = download_video(url, hooks=[progress])
+    title, uploader = info.get("title", ""), info.get("uploader", "")
+    height = info.get("height") or 0
+    size = tmp.stat().st_size / 1_000_000
+    note(f"\r영상: {title} / {uploader}")
+    note(f"화질: {height}p / 크기: {size:.1f}MB" if height else f"크기: {size:.1f}MB")
+    if height and height < 480:
+        note("더 높은 화질은 영상과 소리가 따로 있어 ffmpeg 없이는 합칠 수 없습니다.")
+    try:  # 영상은 태그가 안 붙어도 그만
+        write_tags(tmp, {"title": title, "artist": uploader, "comment": url})
+    except Exception:  # noqa: BLE001
+        pass
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    dest = unique_path(VIDEO_DIR, safe_filename("", title), tmp.suffix.lower() or ".mp4")
+    tmp.replace(dest)
+    note(f"\n저장 완료: {dest}")
+
 def cmd_download(countries=None, url=None, auto=False):
     if not url:
         # 단축어가 남겨 둔 링크 파일이 있으면 그걸 쓰고, 묻지 않는다
@@ -676,7 +737,9 @@ def main(argv=None):
         del args[i:i + 2]
     try:
         cmd = args[0] if args else ""
-        if cmd == "tags":
+        if cmd == "video":
+            cmd_video(args[1] if len(args) > 1 else None)
+        elif cmd == "tags":
             cmd_tags(args[1] if len(args) > 1 else None)
         elif cmd == "apply":
             cmd_apply(countries)
@@ -689,7 +752,7 @@ def main(argv=None):
             cmd_download(countries, url=cmd, auto=not ask_mode)
         elif cmd:
             die(f"알 수 없는 명령 '{cmd}'.",
-                "사용법: musictag.py [링크 | edit | tags | apply | show]")
+                "사용법: musictag.py [링크 | video | edit | tags | apply | show]")
         else:
             cmd_download(countries)
     except KeyboardInterrupt:
