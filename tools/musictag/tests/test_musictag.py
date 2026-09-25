@@ -274,12 +274,34 @@ def test_video_uses_link_txt(tmp_path, monkeypatch, silent_m4a):
     assert seen == ["https://youtu.be/dQw4w9WgXcQ"]
 
 
-def test_video_format_asks_for_combined_stream_only():
-    """ffmpeg가 없으니 영상+소리가 한 파일에 든 형식만 요청해야 한다."""
+FORMATS = [
+    {"format_id": "18", "height": 360, "acodec": "mp4a", "vcodec": "avc1", "tbr": 500},
+    {"format_id": "22", "height": 720, "acodec": "mp4a", "vcodec": "avc1", "tbr": 1500},
+    {"format_id": "137", "height": 1080, "acodec": "none", "vcodec": "avc1", "tbr": 4000},
+    {"format_id": "140", "height": None, "acodec": "mp4a", "vcodec": "none", "tbr": 128},
+]
+
+
+def test_combined_formats_keeps_only_streams_with_both():
+    picks = m.combined_formats({"formats": FORMATS})
+    assert [f["format_id"] for f in picks] == ["18", "22"]   # 화질 낮은 순
+    assert picks[-1]["height"] == 720                        # 가장 좋은 합본
+
+
+def test_combined_formats_empty_when_all_split():
+    split = [f for f in FORMATS if f["acodec"] == "none" or f["vcodec"] == "none"]
+    assert m.combined_formats({"formats": split}) == []
+
+
+def test_video_only_heights_lists_what_exists():
+    assert m.video_only_heights({"formats": FORMATS}) == [360, 720, 1080]
+
+
+def test_video_never_merges_streams():
+    """ffmpeg가 없으니 합치기 옵션을 쓰면 안 된다."""
     import inspect
     src = inspect.getsource(m.download_video)
-    assert "acodec!=none" in src and "vcodec!=none" in src
-    assert "merge_output_format" not in src
+    assert "merge_output_format" not in src and "+bestaudio" not in src
 
 
 # ------------------------------------------------------------ 수기 편집 (tags.txt)

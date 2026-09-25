@@ -636,39 +636,62 @@ def read_link(arg):
 
 VIDEO_DIR = DOCS / "video"
 
-def download_video(url, hooks=None):
-    """영상+소리가 한 파일에 든 형식만 받는다.
+YT_CLIENTS = {"youtube": {"player_client": ["web", "android", "ios", "tv"]}}
 
-    ffmpeg가 없어 따로 받은 영상과 소리를 합칠 수 없다. 유튜브의 고화질은
-    대부분 영상만 따로 있는 형식이라, 받을 수 있는 건 보통 360p, 운이 좋으면 720p다.
+def combined_formats(info):
+    """영상과 소리가 한 파일에 든 형식만, 화질 낮은 순으로."""
+    picks = [f for f in (info.get("formats") or [])
+             if f.get("acodec") not in (None, "none")
+             and f.get("vcodec") not in (None, "none")]
+    return sorted(picks, key=lambda f: (f.get("height") or 0, f.get("tbr") or 0))
+
+def video_only_heights(info):
+    heights = {f.get("height") for f in (info.get("formats") or []) if f.get("height")}
+    return sorted(h for h in heights if h)
+
+def download_video(url, hooks=None):
+    """받을 수 있는 형식을 먼저 확인하고, 합본 중 가장 좋은 것을 받는다.
+
+    ffmpeg가 없어 영상과 소리를 합칠 수 없다. 그래서 무작정 요청하지 않고,
+    실제 목록을 보고 합본이 있는지 확인한 뒤 그 형식을 지정해 받는다.
     """
     try:
         import yt_dlp
     except ImportError as exc:
         die("yt-dlp를 불러오지 못했습니다.",
             "a-Shell에서 'pip install -U yt-dlp' 실행 후 다시 시도하세요.", exc)
+    base = {"quiet": True, "no_warnings": True, "noplaylist": True,
+            "extractor_args": YT_CLIENTS}
+    try:
+        with yt_dlp.YoutubeDL(dict(base, skip_download=True)) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:  # noqa: BLE001
+        die("영상 정보를 읽지 못했습니다.",
+            "'pip install -U yt-dlp'로 업데이트하거나 링크를 다시 확인하세요.", exc)
+    picks = combined_formats(info)
+    if not picks:
+        heights = video_only_heights(info)
+        have = ", ".join(f"{h}p" for h in heights) if heights else "확인 불가"
+        die("영상과 소리가 한 파일에 든 형식이 없습니다.",
+            f"이 영상은 화질별로 영상만 따로 있습니다({have}). ffmpeg 없이는 합칠 수 "
+            "없습니다. 음원만 받으려면 'python3 musictag.py <링크>'를 쓰세요.")
+    best = picks[-1]
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     for old_file in TMP_DIR.glob("tmpvideo*"):
         old_file.unlink()
-    opts = {"format": "best[ext=mp4][acodec!=none][vcodec!=none]/"
-                      "best[acodec!=none][vcodec!=none]",
-            "noplaylist": True, "outtmpl": str(TMP_DIR / "tmpvideo.%(ext)s"),
-            "quiet": True, "no_warnings": True, "noprogress": True,
-            "progress_hooks": list(hooks or [])}
+    opts = dict(base, format=best["format_id"], noprogress=True,
+                outtmpl=str(TMP_DIR / "tmpvideo.%(ext)s"),
+                progress_hooks=list(hooks or []))
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
     except Exception as exc:  # noqa: BLE001
-        text = str(exc).lower()
-        if "requested format" in text or "no video formats" in text:
-            die("영상과 소리가 한 파일에 든 형식이 없습니다.",
-                "ffmpeg 없이는 이 영상을 받을 수 없습니다. 음원만 받으려면 "
-                "'python3 musictag.py <링크>'를 쓰세요.", exc)
         die("영상 다운로드에 실패했습니다.",
             "'pip install -U yt-dlp'로 업데이트하거나 링크를 다시 확인하세요.", exc)
     files = sorted(TMP_DIR.glob("tmpvideo*"))
     if not files:
         die("받은 파일을 찾지 못했습니다.", "링크를 확인하고 다시 실행하세요.")
+    info.setdefault("height", best.get("height"))
     return files[0], info
 
 def cmd_video(url=None):
