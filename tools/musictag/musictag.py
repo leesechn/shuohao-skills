@@ -638,11 +638,22 @@ VIDEO_DIR = DOCS / "video"
 
 YT_CLIENTS = {"youtube": {"player_client": ["web", "android", "ios", "tv"]}}
 
-def combined_formats(info):
-    """영상과 소리가 한 파일에 든 형식만, 화질 낮은 순으로."""
+IOS_EXT = ("mp4", "m4v", "mov")
+IOS_VCODEC = ("avc1", "h264", "hev1", "hvc1")
+
+def combined_formats(info, ios_only=True):
+    """영상과 소리가 한 파일에 든 형식만, 화질 낮은 순으로.
+
+    ios_only면 아이패드가 재생할 수 있는 것(mp4 + H.264 계열)만 남긴다.
+    webm/VP9는 받아도 파일 앱에서 열리지 않는다.
+    """
     picks = [f for f in (info.get("formats") or [])
              if f.get("acodec") not in (None, "none")
              and f.get("vcodec") not in (None, "none")]
+    if ios_only:
+        picks = [f for f in picks
+                 if (f.get("ext") or "").lower() in IOS_EXT
+                 and str(f.get("vcodec") or "").lower().startswith(IOS_VCODEC)]
     return sorted(picks, key=lambda f: (f.get("height") or 0, f.get("tbr") or 0))
 
 def video_only_heights(info):
@@ -670,6 +681,12 @@ def download_video(url, hooks=None):
             "'pip install -U yt-dlp'로 업데이트하거나 링크를 다시 확인하세요.", exc)
     picks = combined_formats(info)
     if not picks:
+        others = combined_formats(info, ios_only=False)
+        if others:
+            kinds = ", ".join(sorted({f.get("ext", "?") for f in others}))
+            die(f"아이패드가 재생할 수 있는 형식이 없습니다. (있는 것: {kinds})",
+                "webm/VP9는 받아도 파일 앱에서 열리지 않습니다. 음원만 받으려면 "
+                "'python3 musictag.py <링크>'를 쓰세요.")
         heights = video_only_heights(info)
         have = ", ".join(f"{h}p" for h in heights) if heights else "확인 불가"
         die("영상과 소리가 한 파일에 든 형식이 없습니다.",
@@ -692,6 +709,7 @@ def download_video(url, hooks=None):
     if not files:
         die("받은 파일을 찾지 못했습니다.", "링크를 확인하고 다시 실행하세요.")
     info.setdefault("height", best.get("height"))
+    info["picked"] = f"{best.get('ext', '?')} / {best.get('vcodec', '?')} + {best.get('acodec', '?')}"
     return files[0], info
 
 def cmd_video(url=None):
@@ -706,6 +724,8 @@ def cmd_video(url=None):
     size = tmp.stat().st_size / 1_000_000
     note(f"\r영상: {title} / {uploader}")
     note(f"화질: {height}p / 크기: {size:.1f}MB" if height else f"크기: {size:.1f}MB")
+    if info.get("picked"):
+        note(f"형식: {info['picked']}")
     if height and height < 480:
         note("더 높은 화질은 영상과 소리가 따로 있어 ffmpeg 없이는 합칠 수 없습니다.")
     try:  # 영상은 태그가 안 붙어도 그만

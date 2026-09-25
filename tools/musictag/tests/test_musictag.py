@@ -275,17 +275,30 @@ def test_video_uses_link_txt(tmp_path, monkeypatch, silent_m4a):
 
 
 FORMATS = [
-    {"format_id": "18", "height": 360, "acodec": "mp4a", "vcodec": "avc1", "tbr": 500},
-    {"format_id": "22", "height": 720, "acodec": "mp4a", "vcodec": "avc1", "tbr": 1500},
-    {"format_id": "137", "height": 1080, "acodec": "none", "vcodec": "avc1", "tbr": 4000},
-    {"format_id": "140", "height": None, "acodec": "mp4a", "vcodec": "none", "tbr": 128},
+    {"format_id": "18", "height": 360, "ext": "mp4",
+     "acodec": "mp4a.40.2", "vcodec": "avc1.42001E", "tbr": 500},
+    {"format_id": "43", "height": 360, "ext": "webm",
+     "acodec": "opus", "vcodec": "vp9", "tbr": 900},
+    {"format_id": "22", "height": 720, "ext": "mp4",
+     "acodec": "mp4a.40.2", "vcodec": "avc1.64001F", "tbr": 1500},
+    {"format_id": "137", "height": 1080, "ext": "mp4",
+     "acodec": "none", "vcodec": "avc1", "tbr": 4000},
+    {"format_id": "140", "height": None, "ext": "m4a",
+     "acodec": "mp4a.40.2", "vcodec": "none", "tbr": 128},
 ]
 
 
 def test_combined_formats_keeps_only_streams_with_both():
+    picks = m.combined_formats({"formats": FORMATS}, ios_only=False)
+    assert [f["format_id"] for f in picks] == ["18", "43", "22"]  # 화질 낮은 순
+    assert picks[-1]["height"] == 720                             # 가장 좋은 합본
+
+
+def test_combined_formats_drops_webm_for_ipad():
+    """webm/VP9는 받아도 파일 앱에서 열리지 않으니 고르면 안 된다."""
     picks = m.combined_formats({"formats": FORMATS})
-    assert [f["format_id"] for f in picks] == ["18", "22"]   # 화질 낮은 순
-    assert picks[-1]["height"] == 720                        # 가장 좋은 합본
+    assert [f["format_id"] for f in picks] == ["18", "22"]
+    assert all(f["ext"] == "mp4" for f in picks)
 
 
 def test_combined_formats_empty_when_all_split():
