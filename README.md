@@ -12,6 +12,7 @@
 | Skill | 做什么 |
 | --- | --- |
 | [**novel-characters**](skills/novel-characters) | 把一篇小说拆成角色设定集：人物画像、形象提示词、音色提示词、角色设定图。报告语言与出图风格可选 |
+| [**sns-autopilot**](skills/sns-autopilot) | X·Threads 运营自动化：采集→爆款结构→草稿→事实核查→人工批准→定时发布→Threads 转发→引流→自动回复→数据对比 |
 
 丢一本小说进去，出这个：
 

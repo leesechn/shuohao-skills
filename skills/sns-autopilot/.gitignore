@@ -1,0 +1,5 @@
+*.db
+config.json
+facts.json
+cta.json
+__pycache__/

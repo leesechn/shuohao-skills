@@ -1,0 +1,13 @@
+{
+  "x": [
+    {"ext_id": "x1", "author": "ref_account_a", "text": "3개월 만에 바뀐 것\n①아침 루틴 고정\n②기록 자동화\n③주 1회 회고\n결국 반복이 이긴다", "likes": 820, "reposts": 90, "replies": 31, "views": 51000, "posted_at": "2026-10-30T22:00:00Z"},
+    {"ext_id": "x2", "author": "ref_account_a", "text": "AI에 일을 맡길 때 실패하는 이유는 하나\n역할을 안 나눠서다", "likes": 410, "reposts": 40, "replies": 12, "views": 23000, "posted_at": "2026-10-30T03:00:00Z"},
+    {"ext_id": "x3", "author": "ref_account_b", "text": "부업 1년차가 알려주는 진짜 순서\n- 기록\n- 비교\n- 정리", "likes": 300, "reposts": 25, "replies": 8, "views": 18000, "posted_at": "2026-10-29T11:00:00Z"}
+  ],
+  "threads": [
+    {"ext_id": "t1", "author": "thread_user", "text": "AI 자동화 해보니 제일 중요한 건 승인 버튼 하나", "likes": 540, "posted_at": "2026-10-30T09:00:00Z"},
+    {"ext_id": "t2", "author": "small_user", "text": "AI 자동화 오늘 시작", "likes": 12, "posted_at": "2026-10-30T09:00:00Z"},
+    {"ext_id": "t3", "author": "side_user", "text": "부업은 결국 복리다", "likes": 260, "posted_at": "2026-10-29T09:00:00Z"}
+  ],
+  "threads_continuations": {"t1": ["(続き) 수집·작성·검증을 나누고 나는 내보낼지만 정한다"]}
+}

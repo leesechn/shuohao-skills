@@ -1,0 +1,9 @@
+# crontab -e  (서버 TZ=Asia/Seoul 가정). DIR는 이 스킬 폴더 절대경로.
+DIR=/opt/sns-autopilot
+CRON_TZ=Asia/Seoul
+# [X1][T1][AI3] 아침: 지적 반영 → 수집 → 型 재작성 → 지표
+5 6 * * *   cd $DIR && python3 -m autopilot -c config.json morning >> logs/morning.log 2>&1
+# [X2][X3] 전날 밤: 유행 이탈 초안 재작성 → 내일 슬롯 보충 (이후 사람이 approve/reject)
+40 22 * * * cd $DIR && python3 -m autopilot -c config.json night   >> logs/night.log 2>&1
+# [X5][T3][A1][A4] 10분마다: 게시·전재·유도·자동응답
+*/10 * * * * cd $DIR && python3 -m autopilot -c config.json tick   >> logs/tick.log 2>&1
