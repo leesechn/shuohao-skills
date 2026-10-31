@@ -1,0 +1,45 @@
+{
+  "dry_run": false,
+  "db": "state/autopilot.db",
+  "timezone": "Asia/Seoul",
+  "model": "claude-opus-5-5",
+  "facts_file": "facts.live.json",
+  "cta_file": "cta.live.json",
+  "reference_accounts": [
+    "여기에_참고계정_아이디"
+  ],
+  "pattern_window_days": 7,
+  "topics": [
+    "AI 자동화",
+    "부업",
+    "콘텐츠 기획",
+    "생산성",
+    "글쓰기",
+    "Claude Code"
+  ],
+  "slots": {
+    "morning": "07:30",
+    "noon": "12:10",
+    "night": "21:00"
+  },
+  "stock_min": 6,
+  "topic_dedupe_days": 30,
+  "topic_similarity": 0.5,
+  "require_approval": true,
+  "threads_enabled": true,
+  "threads_queries": [
+    "AI 자동화",
+    "부업"
+  ],
+  "threads_min_likes": 200,
+  "crosspost_threads": true,
+  "cta_impression_threshold": 10000,
+  "ad_disclosure": "#광고",
+  "auto_reply": {
+    "slot": "morning",
+    "max_per_run": 10,
+    "skip_if_link": true
+  },
+  "image_similarity_max": 0.67,
+  "playbooks": "state/playbooks"
+}

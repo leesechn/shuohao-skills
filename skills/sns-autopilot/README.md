@@ -42,10 +42,44 @@ python3 -m autopilot -c config.json compare | attribution
 
 실전 전환: `dry_run:false` + 환경변수 `X_USER_TOKEN`, `THREADS_TOKEN`, `ANTHROPIC_API_KEY`, 그리고 `deploy/crontab.example` 설치.
 
+## 실제로 켜는 법 (서버 없이 GitHub Actions, 약 30분)
+
+1. **이 브랜치를 `main`에 병합** — GitHub 예약 실행은 기본 브랜치에 있는 워크플로만 돈다.
+   포크 저장소라면 Actions 탭에서 "I understand… enable" 눌러 활성화.
+2. **X 키 4개** — developer.x.com → 앱 생성 → User authentication settings에서 권한 *Read and write* →
+   Keys and tokens에서 API Key/Secret, Access Token/Secret 발급 (권한 바꾼 뒤 Access Token은 **재발급**).
+   종량제 크레딧 충전 필요.
+3. **Threads 토큰** — developers.facebook.com → 앱 생성(Threads API 사용 사례) → 권한
+   `threads_basic, threads_content_publish, threads_manage_replies, threads_read_replies, threads_manage_insights, threads_keyword_search`
+   → 장기 토큰(60일) 발급. *60일마다 재발급해서 Secret 교체 필요.*
+4. **Claude 키** — platform.claude.com → API Keys.
+5. 저장소 **Settings → Secrets and variables → Actions**
+   - Secrets: `X_API_KEY` `X_API_SECRET` `X_ACCESS_TOKEN` `X_ACCESS_SECRET` `THREADS_TOKEN` `ANTHROPIC_API_KEY`
+   - Variables: `AUTOPILOT_ENABLED` = `true` (끄려면 `false`)
+6. `config.live.json`에서 `reference_accounts`(참고 계정 @아이디), `topics`, `threads_queries` 수정.
+   `facts.live.json`에 **증빙 있는 실제 숫자**, `cta.live.json`에 유도문·링크 입력.
+7. Actions → sns-autopilot → **Run workflow** → `cmd=morning` → 이어서 `cmd=night` 한 번씩 수동 실행.
+
+이후 매일 자동:
+
+| KST | 동작 |
+|---|---|
+| 06:05 | 지적 반영 → 참고계정·Threads 수집 → 型 재작성 → 지표 |
+| 22:40 | 유행 이탈 초안 재작성 → 내일 3슬롯 채움 → **실행 결과 화면에 승인 대기표** |
+| 07:30 / 12:10 / 21:00 | 승인된 글 X 게시 + Threads 전재 |
+| 매시 47분 | 지표 갱신 · 1만 임프 넘은 글에 유도(#광고) · 아침 글 답글 자동응답 |
+
+**사람이 하는 일 = 매일 밤 1번**: Actions → Run workflow → `cmd=approve`, `args=3` (안 낼 글은 `reject`, `args=3 --note "과장"`).
+승인 없이 전부 자동으로 내려면 `config.live.json`의 `require_approval`을 `false`로.
+
+주의: 공개 저장소면 `autopilot-state` 브랜치(초안·DB)도 공개된다. 비공개 저장소 권장(Actions 무료 2,000분/월 안에서 약 900분 사용 예상).
+
 ## 알려진 한계 (솔직하게)
 
 - **X 비용**: 종량제 기준 게시 $0.015/건, **URL 포함 게시 $0.20/건**, 타인 글 읽기 $0.005/건. 유도 답글(링크)이 가장 비쌈 → A1 임계값을 낮추지 말 것.
-- **X 토큰 갱신**: OAuth2 사용자 토큰은 2시간 만료. 리프레시 로직은 미포함(외부에서 갱신해 환경변수 주입).
+- **X 인증**: OAuth 1.0a(만료 없음)로 해결. 서명은 X 공식 문서 예제값으로 테스트 검증.
+- **Threads 토큰**: 60일 만료 → 수동 재발급 필요.
+- **GitHub 예약 실행 지연**: 혼잡 시 수~수십 분 늦을 수 있음(게시는 늦게라도 반드시 나감).
 - **Threads 타인 글 좋아요 수**: `keyword_search` 결과에 `like_count` 필드가 제공되는지 공개 문서로 확인 못 함(불확실). 안 주면 T1은 0건 → 이 경우 수동 CSV 투입 필요.
 - **Threads 게시물별 프로필 유입**: API 미제공 → A5는 X만. Threads는 UTM 링크 클릭으로 대체해야 함.
 - **자동 답글(A4)**: X 자동화 규칙상 대량·무차별 자동 답글은 정지 사유. 본인 글에 온 답글만, 상한 10건으로 제한.

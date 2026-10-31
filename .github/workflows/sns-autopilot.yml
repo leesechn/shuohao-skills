@@ -1,0 +1,100 @@
+# sns-autopilot 24시간 무인 실행 (서버 불필요)
+# 켜기: Settings → Secrets and variables → Actions
+#   Variables: AUTOPILOT_ENABLED = true
+#   Secrets  : X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET, THREADS_TOKEN, ANTHROPIC_API_KEY
+# 상태(DB·누적 지적)는 autopilot-state 브랜치에 저장된다.
+name: sns-autopilot
+
+on:
+  schedule:
+    - cron: "5 21 * * *"     # 06:05 KST  morning (지적 반영·수집·型·지표)
+    - cron: "40 13 * * *"    # 22:40 KST  night   (유행이탈 재작성·내일 슬롯 보충 → 승인 대기표)
+    - cron: "30 22 * * *"    # 07:30 KST  tick    (아침 슬롯 게시)
+    - cron: "10 3 * * *"     # 12:10 KST  tick    (점심 슬롯 게시)
+    - cron: "0 12 * * *"     # 21:00 KST  tick    (밤 슬롯 게시)
+    - cron: "47 * * * *"     # 매시 47분 tick     (지표·1만임프 유도·자동응답·지연게시 보정)
+  workflow_dispatch:
+    inputs:
+      cmd:
+        description: "queue | approve | reject | feedback | morning | night | tick | compare | attribution | write | fill"
+        required: true
+        default: queue
+      args:
+        description: '예) approve → 3   reject → 3 --note "과장 표현"   feedback → "이모지 금지"'
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sns-autopilot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: vars.AUTOPILOT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+      THREADS_TOKEN: ${{ secrets.THREADS_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SCHEDULE: ${{ github.event.schedule }}
+      CMD: ${{ inputs.cmd }}
+      ARGS: ${{ inputs.args }}
+    defaults:
+      run:
+        working-directory: skills/sns-autopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet anthropic
+
+      - name: 상태 복원
+        run: |
+          mkdir -p state/playbooks
+          if git fetch --quiet origin autopilot-state; then
+            git archive FETCH_HEAD | tar -x -C state
+          fi
+          for f in playbooks/*.md; do                       # 수순서는 저장소 최신본, learned.md만 누적본 유지
+            [ "$(basename "$f")" = learned.md ] && [ -f state/playbooks/learned.md ] && continue
+            cp "$f" state/playbooks/
+          done
+
+      - name: 실행
+        run: |
+          if [ -z "$CMD" ]; then
+            case "$SCHEDULE" in
+              "5 21 * * *")  CMD=morning ;;
+              "40 13 * * *") CMD=night ;;
+              *)             CMD=tick ;;
+            esac
+          fi
+          echo "▶ $CMD $ARGS"
+          python3 - "$CMD" "$ARGS" <<'PY'
+          import shlex, subprocess, sys
+          sys.exit(subprocess.call([sys.executable, "-m", "autopilot", "-c", "config.live.json",
+                                    sys.argv[1], *shlex.split(sys.argv[2])]))
+          PY
+          if [ "$CMD" = night ] || [ "$CMD" = queue ] || [ "$CMD" = approve ] || [ "$CMD" = reject ]; then
+            { echo "## 승인 대기 (approve/reject 로 결정)"; echo '```json';
+              python3 -m autopilot -c config.live.json queue; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 상태 저장
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd state
+          git init -q && git checkout -q -b autopilot-state
+          git add -A
+          git -c user.name=sns-autopilot -c user.email=sns-autopilot@users.noreply.github.com \
+            commit -qm "state $(date -u +%FT%TZ)" || exit 0
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" autopilot-state

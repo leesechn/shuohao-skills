@@ -104,3 +104,18 @@ class E2E(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OAuth1Sig(unittest.TestCase):
+    def test_x_documented_example(self):
+        """X 공식 문서 'Creating a signature' 예제 값으로 서명 일치 확인."""
+        from unittest import mock
+        from autopilot import clients
+        o = clients.OAuth1("xvz1evFS4wEEPTGEFPHBog", "kAcSOqF21Fu85e7zjz7ZN2U4ZRhfV3WpwPAoE3Z7kBw",
+                           "370773112-GmHxMAgYyLbNEtIKZeRNFsMKPR9EyMZeS9weJAEb",
+                           "LswwdoUaIvS8ltyTt5jkRh4J50vUPVVHtR2YPi5kE")
+        with mock.patch.object(clients.secrets, "token_hex", return_value="kYjzVBB8Y0ZFabxSWbWovY3uYSQ2pTgmZeNu2VS4cg"), \
+                mock.patch.object(clients.time, "time", return_value=1318622958):
+            h = o.header("POST", "https://api.twitter.com/1.1/statuses/update.json",
+                         {"status": "Hello Ladies + Gentlemen, a signed OAuth request!", "include_entities": "true"})
+        self.assertIn('oauth_signature="hCtSmYh%2BiHYCEqBWrE7C7hYmtUk%3D"', h)

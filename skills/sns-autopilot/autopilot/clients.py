@@ -1,14 +1,20 @@
 """X API v2 / Threads Graph API 클라이언트 + 오프라인 Fake.
 
 인증:
-  X        : X_USER_TOKEN   (OAuth 2.0 사용자 토큰, scope: tweet.read tweet.write users.read offline.access)
+  X (권장) : X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET  (OAuth 1.0a — 만료 없음)
+  X (대안) : X_USER_TOKEN   (OAuth 2.0 사용자 토큰 — 2시간 만료, 외부 갱신 필요)
   Threads  : THREADS_TOKEN  (scope: threads_basic, threads_content_publish, threads_manage_replies,
                              threads_read_replies, threads_manage_insights, threads_keyword_search)
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import itertools
 import json
+import secrets
+import time
 import os
 import urllib.error
 import urllib.parse
@@ -20,12 +26,36 @@ class APIError(RuntimeError):
     pass
 
 
-def _http(method: str, url: str, token: str, params: dict | None = None, body: dict | None = None):
+def _q(s: str) -> str:
+    return urllib.parse.quote(str(s), safe="~")
+
+
+class OAuth1:
+    """OAuth 1.0a HMAC-SHA1 서명 (RFC 5849). JSON 본문은 서명 대상이 아님."""
+
+    def __init__(self, ck, cs, tk, ts):
+        self.ck, self.cs, self.tk, self.ts = ck, cs, tk, ts
+
+    def header(self, method: str, url: str, query: dict) -> str:
+        oa = {"oauth_consumer_key": self.ck, "oauth_nonce": secrets.token_hex(16),
+              "oauth_signature_method": "HMAC-SHA1", "oauth_timestamp": str(int(time.time())),
+              "oauth_token": self.tk, "oauth_version": "1.0"}
+        allp = {**{k: str(v) for k, v in query.items()}, **oa}
+        norm = "&".join(f"{k}={v}" for k, v in sorted((_q(k), _q(v)) for k, v in allp.items()))
+        base = "&".join([method.upper(), _q(url), _q(norm)])
+        key = f"{_q(self.cs)}&{_q(self.ts)}".encode()
+        oa["oauth_signature"] = base64.b64encode(hmac.new(key, base.encode(), hashlib.sha1).digest()).decode()
+        return "OAuth " + ", ".join(f'{_q(k)}="{_q(v)}"' for k, v in sorted(oa.items()))
+
+
+def _http(method: str, url: str, token, params: dict | None = None, body: dict | None = None):
+    params = {k: v for k, v in (params or {}).items() if v is not None}
+    auth = token.header(method, url, params) if isinstance(token, OAuth1) else f"Bearer {token}"
     if params:
-        url += ("&" if "?" in url else "?") + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
-        "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+        "Authorization": auth, "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read() or b"{}")
@@ -38,8 +68,11 @@ class XClient:
     BASE = "https://api.x.com/2"
     FIELDS = "created_at,public_metrics,conversation_id,author_id"
 
-    def __init__(self, token: str | None = None):
-        self.token = token or os.environ["X_USER_TOKEN"]
+    def __init__(self, token=None):
+        e = os.environ
+        if token is None and all(e.get(k) for k in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET")):
+            token = OAuth1(e["X_API_KEY"], e["X_API_SECRET"], e["X_ACCESS_TOKEN"], e["X_ACCESS_SECRET"])
+        self.token = token or e["X_USER_TOKEN"]
         self._me = None
 
     def _get(self, path, **p):
@@ -112,7 +145,10 @@ class ThreadsClient:
     def post(self, text: str, reply_to: str | None = None) -> str:
         cid = _http("POST", self.BASE + "/me/threads", self.token,
                     {"media_type": "TEXT", "text": text, "reply_to_id": reply_to})["id"]
+        time.sleep(self.publish_wait)       # Meta 권장: 컨테이너 생성 후 잠시 대기 뒤 publish
         return _http("POST", self.BASE + "/me/threads_publish", self.token, {"creation_id": cid})["id"]
+
+    publish_wait = 5
 
     def metrics(self, ext_id: str) -> dict:
         res = self._get(f"/{ext_id}/insights", metric="views,likes,replies,reposts,quotes,shares")

@@ -3,3 +3,4 @@ config.json
 facts.json
 cta.json
 __pycache__/
+state/
