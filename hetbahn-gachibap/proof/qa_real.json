@@ -1,0 +1,23 @@
+{
+ "contact_sheet": "/home/user/shuohao-skills/hetbahn-gachibap/proof/contact_real_1s.jpg",
+ "frozen_violations": [],
+ "longest_still_s": 0.0,
+ "loudness": {
+  "I": -14.1,
+  "LRA": 9.4,
+  "TP": -1.1
+ },
+ "contrast": {
+  "흰 글자 / KV 레드 #B52A23": 6.32,
+  "노랑 #FFFC87 / KV 레드": 5.88,
+  "흰 글자 / 네이비 말풍선 #1C2733": 15.14,
+  "노랑 '나' / 네이비 말풍선": 14.07,
+  "잉크 #1A1A1A / 흰 말풍선": 17.4,
+  "회색 날짜 #82807A / 쌀백 #F8F7F2": 3.68,
+  "흰 버튼 글자 / 레드 버튼": 6.32,
+  "앰버 숫자 #F29A2E / 디스플레이 #141618": 8.15,
+  "보조 문구 #FFE1DC / KV 레드": 5.14
+ },
+ "safe_area_checked": 267,
+ "safe_area_violations": []
+}

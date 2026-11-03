@@ -1,0 +1,90 @@
+[1] 2026-11-03T01:3x UTC | Runway (claude.ai 커넥터) | nano-banana-2-lite (Gemini 3.1 Flash Lite Image) | S10_real
+    프롬프트: Photoreal film still, one long light-wood dining table seen from the side at seated eye level, dead-center symmetry, the table running horizontally across the lower middle of the frame. A Korean woman in her late 20s (shoulder-length straight black hair, oversized oatmeal knit cardigan) sits on the left side facing right, and a Korean man in his late 20s (short black hair, navy crewneck sweatshirt) sits on the right side facing left, both in profile, both laughing warmly, each holding a stainless spoon. On the table directly in front of each of them there is an empty clear space. The left half of the room is a Seoul apartment at night lit by a warm 2700K pendant lamp with a dark navy window showing city lights; the right half of the room is a New York kitchen in the morning lit by cool daylight from a bright window; the two lights blend softly along the vertical center line of the frame. Wide shot, people occupy the middle band, plenty of clean wall above. 35mm lens look, soft natural film grain, bright clean exposure, gentle halation. No text, no letters, no logos, no watermark, no bowls, no food.
+    job: 52e77dbf-36a5-4f58-ab5c-ee0cb44d052a
+    files: ['work/stills/S10_real.jpg']
+    seed: 서비스 미공개
+    aspect: 9:16
+[2] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S04a_real
+    프롬프트: Photoreal film still, 9 pm in a compact Seoul officetel kitchenette. Foreground: a clean pale birch-wood counter surface fills the lower third of the frame and is completely empty and clear in the lower center. Mid-ground behind the counter: a Korean woman in her late 20s, shoulder-length straight black hair tucked behind the right ear, oversized oatmeal knit cardigan, thin silver ring on the right index finger, seen in three-quarter view with her head tilted down toward the counter so her face is mostly hidden by her hair, both hands resting on the counter edge on either side of the empty spot. Background: white square tile backsplash, a single warm 2700K pendant lamp above her, a window behind showing Seoul apartment blocks with many lit windows against a deep navy night sky. Symmetrical dead-center framing, camera at chest height. 35mm lens look, soft natural film grain, bright clean exposure with nothing crushed to black, gentle halation on highlights. No text, no letters, no logos, no watermark, no bowl, no food on the counter.
+    job: figma b1Lvb3c3EZlRf46VdgG61X node 1:2
+    files: ['work/stills/S04a_real.png']
+    seed: 서비스 미공개
+    aspect: 1:1
+[3] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S04b_real
+    프롬프트: Photoreal film still, 8 am in a narrow New York prewar apartment kitchen. Foreground: a clean pale birch-wood counter surface fills the lower third of the frame and is completely empty and clear in the lower center. Mid-ground behind the counter: a Korean man in his late 20s, short black hair, navy crewneck sweatshirt, black digital watch on the left wrist, seen in three-quarter view with his head tilted down toward the counter so his face is mostly turned away, both hands resting on the counter edge on either side of the empty spot. Background: white subway tile, a black-framed window with a black iron fire escape and red brick buildings outside, low cool 6500K morning sunlight raking in from the right side, pale blue-grey morning air. Symmetrical dead-center framing, camera at chest height. 35mm lens look, soft natural film grain, bright clean exposure with nothing crushed to black, gentle halation on highlights. No text, no letters, no logos, no watermark, no bowl, no food on the counter.
+    job: figma node 1:3
+    files: ['work/stills/S04b_real.png']
+    seed: 서비스 미공개
+    aspect: 1:1
+[4] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S11_real
+    프롬프트: Photoreal macro film still on a light-wood table seen from slightly above. The left half of the frame is lit by warm 2700K tungsten light and the right half by cool 6500K morning daylight, and the two lights meet in a soft vertical line at the exact center. A woman's hand wearing a thin silver ring enters from the left holding a stainless steel spoon with a small heap of glossy pearly white cooked rice; a man's hand wearing a black digital watch enters from the right holding a stainless steel spoon with glossy white cooked rice; the two spoons clink together exactly on the center line, a tiny sparkle on the steel. Shallow depth of field, 35mm lens look, soft film grain, bright clean exposure, gentle halation. No text, no letters, no logos, no watermark, no bowls.
+    job: figma node 1:4
+    files: ['work/stills/S11_real.png']
+    seed: 서비스 미공개
+    aspect: 1:1
+[5] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S12a_real
+    프롬프트: Photoreal split-screen film still divided vertically exactly down the middle by a thin clean line. Left half: a university dormitory desk at night lit by a warm desk lamp, a young Korean student's two hands resting flat on the desk, books pushed aside. Right half: a warm hometown family kitchen in soft morning daylight, a Korean mother's two hands resting flat on a wooden table. In both halves the table surface directly between the hands in the lower center is empty and clear. Matching camera height, mirrored composition, faces out of frame, only hands, forearms and torsos visible. 35mm lens look, soft film grain, bright clean exposure. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:5
+    files: ['work/stills/S12a_real.png']
+    seed: 서비스 미공개
+    aspect: 16:9
+[6] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S12b_real
+    프롬프트: Photoreal split-screen film still divided vertically exactly down the middle by a thin clean line. Left half: a Korean grandmother's kitchen table with a floral oilcloth, her wrinkled hands resting flat on the table, warm afternoon light. Right half: a grandchild's study desk in a bright city apartment, a teenager's two hands resting flat on the desk, cool daylight. In both halves the table surface directly between the hands in the lower center is empty and clear. Matching camera height, mirrored composition, faces out of frame, only hands, forearms and torsos visible. 35mm lens look, soft film grain, bright clean exposure. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:6
+    files: ['work/stills/S12b_real.png']
+    seed: 서비스 미공개
+    aspect: 16:9
+[7] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S12c_real
+    프롬프트: Photoreal split-screen film still divided vertically exactly down the middle by a thin clean line. Left half: a late-night office desk under cool white light with a glowing monitor in the background, an office worker's two hands in white shirt cuffs resting flat on the desk. Right half: a friend's small cozy studio apartment at night with warm string lights, a person's two hands in hoodie sleeves resting flat on a low wooden table. In both halves the table surface directly between the hands in the lower center is empty and clear. Matching camera height, mirrored composition, faces out of frame, only hands, forearms and torsos visible. 35mm lens look, soft film grain, bright clean exposure. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:7
+    files: ['work/stills/S12c_real.png']
+    seed: 서비스 미공개
+    aspect: 16:9
+[8] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S04a_mini
+    프롬프트: Handmade stop-motion miniature set photographed like a dollhouse cross-section: a tiny Seoul apartment kitchenette at 9 pm made of corrugated cardboard walls with small white paper tiles, a cellophane window showing cardboard apartment blocks with little warm lit windows against a navy felt night sky, a tiny warm practical pendant lamp. A needle-felted wool figure of a young Korean woman with a shoulder-length black felt bob and an oversized oatmeal knitted cardigan stands behind a balsa-wood counter, head tilted down, felt hands resting on the counter edge. The foreground balsa-wood counter surface in the lower third is completely empty and clear in the center. Tilt-shift shallow focus, warm practical lights, symmetrical framing. No text, no letters, no logos, no bowl, no food.
+    job: figma node 1:8
+    files: ['work/stills/S04a_mini.png']
+    seed: 서비스 미공개
+    aspect: 1:1
+[9] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S04b_mini
+    프롬프트: Handmade stop-motion miniature set photographed like a dollhouse cross-section: a tiny New York apartment kitchen at 8 am made of corrugated cardboard walls with small white paper subway tiles, a black-painted cardboard window frame with a tiny wire fire escape and red cardboard brick buildings outside behind cellophane, cool pale-blue morning light raking in from the right. A needle-felted wool figure of a young Korean man with short black felt hair, a navy felt crewneck sweatshirt and a tiny black watch stands behind a balsa-wood counter, head tilted down, felt hands resting on the counter edge. The foreground balsa-wood counter surface in the lower third is completely empty and clear in the center. Tilt-shift shallow focus, symmetrical framing, mirror composition of a night kitchen. No text, no letters, no logos, no bowl, no food.
+    job: figma node 1:9
+    files: ['work/stills/S04b_mini.png']
+    seed: 서비스 미공개
+    aspect: 1:1
+[10] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S10_mini
+    프롬프트: Handmade stop-motion miniature set, dollhouse cross-section, vertical frame: one small balsa-wood dining table seen from the side at eye level, dead-center symmetry. A needle-felted wool figure of a young Korean woman (black felt bob, oatmeal knitted cardigan) sits on the left facing right, and a needle-felted wool figure of a young Korean man (short black felt hair, navy felt sweatshirt) sits on the right facing left, both in profile with happy felt smiles, each holding a tiny metal spoon. On the table in front of each figure there is an empty clear space. The left half of the cardboard room is a Seoul night with a navy felt sky, cardboard apartment blocks with lit windows and a warm tiny pendant lamp; the right half is a New York morning with a bright cellophane window and cool daylight; the two lights blend along the vertical center line. Cotton-wool clouds, tilt-shift shallow focus, warm practical lights, plenty of clean cardboard wall above. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:10
+    files: ['work/stills/S10_mini.png']
+    seed: 서비스 미공개
+    aspect: 9:16
+[11] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S12a_mini
+    프롬프트: Handmade stop-motion miniature set, split-screen dollhouse cross-section divided vertically exactly down the middle by a thin cardboard wall. Left half: a tiny cardboard university dorm room at night with a felt desk lamp glowing warm, a needle-felted wool student figure sitting at a balsa desk with felt hands on the desk. Right half: a tiny cardboard hometown kitchen in the morning, a needle-felted wool mother figure in a felt apron sitting at a balsa table with felt hands on the table. In both halves the table surface between the hands is empty and clear. Tilt-shift shallow focus, warm practical lights, mirrored composition. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:11
+    files: ['work/stills/S12a_mini.png']
+    seed: 서비스 미공개
+    aspect: 16:9
+[12] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S12b_mini
+    프롬프트: Handmade stop-motion miniature set, split-screen dollhouse cross-section divided vertically exactly down the middle by a thin cardboard wall. Left half: a tiny cardboard grandmother's kitchen with a floral fabric tablecloth, a needle-felted wool grandmother figure with grey felt hair sitting at the table, felt hands on the table, warm afternoon light. Right half: a tiny cardboard city apartment study with a cellophane window, a needle-felted wool teenager figure in a felt hoodie sitting at a balsa desk, felt hands on the desk, cool daylight. In both halves the table surface between the hands is empty and clear. Tilt-shift shallow focus, mirrored composition. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:12
+    files: ['work/stills/S12b_mini.png']
+    seed: 서비스 미공개
+    aspect: 16:9
+[13] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S12c_mini
+    프롬프트: Handmade stop-motion miniature set, split-screen dollhouse cross-section divided vertically exactly down the middle by a thin cardboard wall. Left half: a tiny cardboard office at night with a glowing paper monitor and cool white light, a needle-felted wool office worker figure in a white felt shirt sitting at a balsa desk, felt hands on the desk. Right half: a tiny cozy cardboard studio apartment at night with tiny warm string lights, a needle-felted wool friend figure in a grey felt hoodie sitting at a low balsa table, felt hands on the table. In both halves the table surface between the hands is empty and clear. Tilt-shift shallow focus, warm practical lights, mirrored composition. No text, no letters, no logos, no bowls, no food.
+    job: figma node 1:13
+    files: ['work/stills/S12c_mini.png']
+    seed: 서비스 미공개
+    aspect: 16:9
+[14] 2026-11-03T01:3x UTC | Figma AI (claude.ai 커넥터, generate_image) | gemini-3.1-flash-lite-image | S11_mini
+    프롬프트: Handmade stop-motion miniature macro: on a balsa-wood tabletop, the left half lit warm tungsten and the right half lit cool morning daylight meeting in a soft vertical line at the exact center. A needle-felted wool hand with a tiny silver wire ring enters from the left holding a small metal spoon with a heap of cotton-white felt rice grains; a needle-felted wool hand with a tiny black felt watch enters from the right holding a small metal spoon with felt rice; the two spoons touch exactly on the center line. Tilt-shift shallow focus, warm practical lights. No text, no letters, no logos, no bowls.
+    job: figma node 1:14
+    files: ['work/stills/S11_mini.png']
+    seed: 서비스 미공개
+    aspect: 1:1
+[15] 2026-11-03 | Higgsfield (claude.ai 커넥터) | gpt_image_2_5 | generate_image_batch
+    note: 무료 플랜이라 '베이직 이상 필요'로 거절, 생성 0건·과금 0
+[16] 2026-11-03 | Higgsfield | nano_banana_2_lite | generate_image
+    note: 무료 플랜 거절, 생성 0건
+[17] 2026-11-03 | 로컬 코드 (Python·NumPy·OpenCV·Pillow·FFmpeg) | - | tools/pipeline/*.py
+    note: 채팅 UI·KV 카드·전자레인지·필름 개봉·김 파티클·경계 녹임·분해도·캐러셀·음악·효과음 전부 코드 렌더. 제품은 refs/ 실사진 컷아웃 합성

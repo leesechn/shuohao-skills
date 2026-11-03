@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "NotebookEdit",
+      "Skill",
+      "Agent",
+      "SendUserFile",
+      "Artifact",
+      "mcp__hetbahn_studio__*",
+      "mcp__claude_ai_Runway__*",
+      "mcp__claude_ai_Higgsfield__*",
+      "mcp__claude_ai_Krea__*",
+      "mcp__claude_ai_Canva__*",
+      "mcp__claude_ai_Figma__*"
+    ],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true
+}
