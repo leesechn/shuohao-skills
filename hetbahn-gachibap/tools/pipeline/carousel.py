@@ -12,7 +12,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 from fx import (RICE, SEOUL, TUNG, NYC, INK, RED, YEL, AMBER, c01, load_rgba, place, soft_shadow, text_rgba,
                 put_text, halftone_text, kv_background, gold_trail, sparkle, steam, link_mark, ui_card, fbm,
-                BOWL_CLOSED, LID_FRONT, BOWL_OPEN)
+                BOWL_CLOSED, LID_FRONT, BOWL_OPEN, mark_xy, mark_size, bowl_closed_img)
 from film import exploded, facet_bowl, get_bubble
 from assets import resolve_logos
 
@@ -43,13 +43,12 @@ def tag(dst, color=(255, 236, 232), y=CH - 60):
     put_text(dst, "미래 햇반 콘셉트 · AI 활용 제작", CW / 2, y, "body", 30, color, stroke=2 if kv else 0)
 
 
-def bowl_with_mark(dst, x, y, w, heat=1.0, flip=False):
-    b = load_rgba(BOWL_CLOSED["path"])
+def bowl_with_mark(dst, x, y, w, heat=1.0, flip=False, lift=0.0):
+    b = bowl_closed_img(lift=lift) if lift else load_rgba(BOWL_CLOSED["path"])
     soft_shadow(dst, x, y + w * 0.36, w * 0.95, w * 0.14, 0.4)
     place(dst, b, x, y, w)
-    k = w / b.shape[1]
-    mx, my = x + (85 - b.shape[1] / 2) * k, y + (184 - b.shape[0] / 2) * k
-    link_mark(dst, int(mx), int(my), max(10, int(22 * k * 1.9)), heat=heat, flash=0.5 * heat)
+    mx, my = mark_xy(x, y, w)
+    link_mark(dst, int(mx), int(my), mark_size(w), heat=heat, flash=0.5 * heat)
     return mx, my
 
 
@@ -64,8 +63,11 @@ def slide1():
     # clear sleeve
     sl = ui_card(900, 470, 70, (255, 255, 255), shadow=0.0)
     place(f, sl, CW / 2, 800, sl.shape[1], alpha=0.12)
-    m1 = bowl_with_mark(f, CW / 2 - 205, 800, 410)
-    m2 = bowl_with_mark(f, CW / 2 + 205, 800, 410)
+    m1 = bowl_with_mark(f, CW / 2 - 225, 790, 450, lift=80)
+    m2 = bowl_with_mark(f, CW / 2 + 225, 790, 450)
+    tk = text_rgba("톡", "title", 110, YEL, 8, INK)
+    place(f, tk, CW / 2 - 400, 700, tk.shape[1], rot=0.2)
+    put_text(f, "혼자 당기면 '톡' 하고 다시 붙어요", CW / 2, 1010, "body", 36, (255, 255, 255), stroke=3)
     # amber link arc between the two marks (thin, not an orb)
     pts = []
     for i in range(41):
@@ -74,7 +76,7 @@ def slide1():
         y = m1[1] - math.sin(u * math.pi) * 90
         pts.append((int(x), int(y)))
     cv2.polylines(f, [np.array(pts, np.int32)], False, tuple(float(_v) for _v in c01(YEL)), 4, cv2.LINE_AA)
-    put_text(f, "짝과 같은 순간 데워야 열립니다", CW / 2, 1130, "title", 54, YEL)
+    put_text(f, "짝과 같은 순간 데워야 열립니다", CW / 2, 1120, "title", 54, YEL)
     tag(f)
     for (x, y) in [(150, 620), (950, 560), (930, 1010)]:
         sparkle(f, x, y, 26, 0.9)
@@ -96,7 +98,8 @@ def slide2():
     put_text(f, "콘셉트", 120, 1160, "title", 40, (0xB0, 0x60, 0x10), anchor="lm")
     put_text(f, "감온 잉크 마크 + 근거리 통신 칩", 270, 1160, "body", 34, INK, anchor="lm")
     put_text(f, "짝이 같은 순간 데워졌을 때만 접착층이 풀림", 270, 1215, "body", 30, (90, 90, 90), anchor="lm")
-    tag(f, y=CH - 45)
+    put_text(f, "필름 4층 구성은 CJ제일제당 공개 포장 기술 도해 기준", CW / 2, 1282, "body", 26, (255, 225, 220), stroke=2)
+    tag(f, y=CH - 28)
     return f
 
 
@@ -160,10 +163,11 @@ def slide4():
         cv2.rectangle(f, (x, y), (x + cs, y + cs), (1, 1, 1), -1 if not last else 4, cv2.LINE_AA)
         put_text(f, f"{i + 1}개월", x + cs / 2, y + cs / 2, "title", 40, RED if not last else (255, 255, 255))
     # lid that opened on its own after 9 months, with the printed promise
-    lid = load_rgba(LID_FRONT["path"])
-    place(f, lid, 820, 560, 330, rot=0.08)
-    stamp = text_rgba("다음엔 꼭", "end", 44, RED)
-    place(f, stamp, 870, 640, stamp.shape[1], rot=-0.12)
+    bowl_with_mark(f, 845, 560, 330, heat=0.0)
+    sticker = ui_card(200, 84, 18, (255, 255, 255), shadow=0.3)
+    place(f, sticker, 900, 455, sticker.shape[1], rot=-0.10)
+    stamp = text_rgba("다음엔 꼭", "end", 40, RED)
+    place(f, stamp, 900, 455, stamp.shape[1], rot=-0.10)
     put_text(f, "9개월이 지나면 혼자서도 열리고", CW / 2, 980, "title", 52, (255, 255, 255))
     put_text(f, "뚜껑에 '다음엔 꼭'이 남습니다", CW / 2, 1050, "title", 52, YEL)
     put_text(f, "기다리던 밥은 그대로 먹을 수 있어 버려지는 밥이 없습니다", CW / 2, 1140, "body", 34, (255, 236, 232), stroke=3)

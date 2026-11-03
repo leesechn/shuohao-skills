@@ -325,13 +325,13 @@ def sparkle(dst, x, y, size, a=1.0, color=(1.0, 0.97, 0.88)):
 _SPR = {}
 
 
-def _splat(layer, x, y, r, a, hard=False):
-    """Additive gaussian splat (overlapping puffs accumulate density)."""
-    ri = int(r * 2.2) + 1
-    key = (ri, round(r, 1), hard)
+def _splat(layer, x, y, r, a, hard=False, asp=1.0):
+    """Additive gaussian splat (overlapping puffs accumulate density); asp > 1 stretches it vertically (wisps)."""
+    ri = int(r * 2.2 * max(1.0, asp)) + 1
+    key = (ri, round(r, 1), hard, round(asp, 1))
     if key not in _SPR:
         yy, xx = np.mgrid[-ri:ri + 1, -ri:ri + 1].astype(np.float32)
-        d2 = (xx ** 2 + yy ** 2) / (r * r)
+        d2 = (xx ** 2) / (r * r) + (yy ** 2) / ((r * asp) ** 2)
         _SPR[key] = np.clip(1.2 - d2 ** 1.5, 0, 1) if hard else np.exp(-d2 * 1.2)
     spr = _SPR[key]
     h, w = layer.shape
@@ -374,9 +374,13 @@ def steam(dst, t, t0, sources, seed=11, n=140, strength=1.0, rise=320, spread=60
         cy = y - rise * a - 40 * a * a
         life = age / max_age
         alpha = (1 - life) ** 1.4 * min(1.0, age / 0.15)
-        r = (14 + 46 * a) * (1.6 if cotton else 1.0)
-        _splat(layer, cx / 4, cy / 4, max(1.5, r / 4), alpha * 0.55, hard=cotton)
-    layer = cv2.GaussianBlur(layer, (0, 0), 2.0 if not cotton else 1.0)
+        if cotton:
+            r = (14 + 46 * a) * 1.6
+            _splat(layer, cx / 4, cy / 4, max(1.5, r / 4), alpha * 0.55, hard=True)
+        else:  # thin laminar wisps that thin out and curl at the edges
+            r = 6 + 20 * a
+            _splat(layer, cx / 4, cy / 4, max(1.2, r / 4), alpha * 0.42, asp=2.2 - 0.8 * min(1.0, a))
+    layer = cv2.GaussianBlur(layer, (0, 0), 1.2 if not cotton else 1.0)
     layer = cv2.resize(layer, (dst.shape[1], dst.shape[0]), interpolation=cv2.INTER_LINEAR)
     m = np.clip(1 - np.exp(-layer * strength * (1.5 if cotton else 1.0)), 0, 0.92)
     col = np.array(tint, np.float32)
@@ -413,33 +417,68 @@ def link_mark(dst, x, y, size, heat=0.0, flash=0.0, rot=-0.35):
 
 
 # geometry of the real product cutouts (pixel coords in work/assets/*)
-BOWL_CLOSED = dict(path="work/assets/bowl_closed.png", badge=(240, 184), badge_r=(118, 92), tab=(70, 470))
+BOWL_CLOSED = dict(path="work/assets/bowl_closed210.png", size=(1342, 718), mark=(275.8, 103.9), tab=(101.4, 468.2))
+OPEN_DY = -29.0  # open photo centre vs closed composite centre, in source px (same 1342 px width)
+
+
+def mark_xy(cx, cy, width):
+    """Link-mark position for a closed bowl placed centred at (cx, cy) with given width."""
+    w0, h0 = BOWL_CLOSED["size"]
+    k = width / w0
+    return cx + (BOWL_CLOSED["mark"][0] - w0 / 2) * k, cy + (BOWL_CLOSED["mark"][1] - h0 / 2) * k
+
+
+def mark_size(width):
+    return max(6, int(width * 0.045))
+
+
+def open_center(cx, cy, width):
+    return cx, cy + OPEN_DY * width / BOWL_CLOSED["size"][0]
 LID_FRONT = dict(path="work/assets/lid_front.png", badge=(295, 353), badge_r=(140, 160))
 BOWL_OPEN = dict(path="work/assets/bowl_open.png")
 
 
 def bowl_closed_img(lift=0.0, dome=0.0):
-    """Real lid photo; lift (px in source space) peels the front-left pull-tab up (spring back via caller)."""
+    """Real closed bowl. lift (source px) peels the front-left pull-tab corner of the film up around a hinge:
+    the flap is cut from the photo, rotated/raised, the gap under it is shaded (caller springs it back)."""
     img = load_rgba(BOWL_CLOSED["path"])
     if lift <= 0.01 and dome <= 0.001:
         return img
     h, w = img.shape[:2]
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    tx, ty = BOWL_CLOSED["tab"]
-    d = np.hypot(xx - tx, (yy - ty) * 1.25)
-    wgt = np.clip(1 - d / 260.0, 0, 1) ** 1.6
-    map_x = xx + wgt * lift * 0.25
-    map_y = yy + wgt * lift
+    out = img.copy()
     if dome > 0:
-        cx, cy = w * 0.5, h * 0.42
-        r = np.hypot((xx - cx) / (w * 0.5), (yy - cy) / (h * 0.42))
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        cx, cy = w * 0.5, h * 0.36
+        r = np.hypot((xx - cx) / (w * 0.5), (yy - cy) / (h * 0.36))
         bulge = np.clip(1 - r, 0, 1) ** 2
-        map_y = map_y + bulge * dome * 8
-    out = cv2.remap(img, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+        out = cv2.remap(out, xx, yy + bulge * dome * 10, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
     if lift > 0.5:
-        # shade under the lifted edge
-        sh = np.clip(wgt * lift / 40.0, 0, 0.35)
-        out[..., :3] *= (1 - sh * 0.4)[..., None]
+        tx, ty = BOWL_CLOSED["tab"]
+        R = 260.0
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        d = np.hypot(xx - tx, (yy - ty) * 1.4)
+        lid_zone = (yy < h * 0.80).astype(np.float32)
+        m = np.clip((R - d) / 25.0, 0, 1) * lid_zone * out[..., 3]
+        flap = out * m[..., None]
+        # hinge = far edge of the flap; rotate the flap up about it
+        hx, hy = tx + R * 0.75, ty - R * 0.35
+        ang = -min(lift, 120) * 0.0022
+        M = cv2.getRotationMatrix2D((hx, hy), math.degrees(ang), 1.0)
+        M[1, 2] -= lift
+        M[0, 2] -= lift * 0.15
+        flap_t = cv2.warpAffine(flap, M, (w, h), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0, 0))
+        # gap under the raised film: the inner rim shows, darker
+        gap = m * np.clip(lift / 30.0, 0, 1)
+        out[..., :3] *= (1 - 0.20 * gap)[..., None]
+        # contact shadow of the flap
+        sh = cv2.GaussianBlur(flap_t[..., 3], (0, 0), 6)
+        sh = np.roll(sh, int(lift * 0.6), axis=0)
+        out[..., :3] *= (1 - 0.14 * np.clip(sh, 0, 1))[..., None]
+        fa = flap_t[..., 3:4]
+        # underside of the film is slightly brighter (white back of the lid) near the edge
+        flap_col = np.clip(flap_t[..., :3] / np.maximum(fa, 1e-4) * 1.02, 0, 1)
+        out[..., :3] = out[..., :3] * (1 - fa) + flap_col * fa
+        out[..., 3:4] = np.maximum(out[..., 3:4], fa)
     return out
 
 

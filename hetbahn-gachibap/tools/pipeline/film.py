@@ -11,7 +11,7 @@ import cv2
 from fx import (W, H, FPS, RICE, SEOUL, TUNG, NYC, DAY, INK, RED, YEL, IVORY, AMBER,
                 c01, clamp, ease_out, ease_in_out, spring, pop, load_rgb, load_rgba, cover, place,
                 soft_shadow, text_rgba, put_text, text_width, halftone_text, fbm, finish, kv_background,
-                gold_trail, sparkle, steam, link_mark, bowl_closed_img, ui_card, BOWL_CLOSED, LID_FRONT,
+                gold_trail, sparkle, steam, link_mark, bowl_closed_img, ui_card, BOWL_CLOSED, LID_FRONT, mark_xy, mark_size, open_center,
                 BOWL_OPEN)
 from assets import resolve_logos
 
@@ -24,8 +24,8 @@ HALF = H // 2
 
 # placements of the real product on AI stills (still pixel coords): cx, base_y, width
 PLACE = {
-    "S04a_real": (512, 935, 390), "S04b_real": (512, 935, 390),
-    "S04a_mini": (512, 738, 300), "S04b_mini": (430, 722, 300),
+    "S04a_real": (512, 905, 360), "S04b_real": (512, 905, 360),
+    "S04a_mini": (512, 738, 300), "S04b_mini": (430, 720, 300),
     "S10_real": [(282, 858, 118), (500, 858, 118)], "S10_mini": [(300, 905, 120), (470, 905, 120)],
     "S12a_real": [(560, 585, 175), (790, 575, 175)], "S12b_real": [(590, 625, 175), (975, 650, 175)],
     "S12c_real": [(470, 700, 175), (950, 690, 175)],
@@ -113,9 +113,12 @@ def chat_stack(f, t, scroll, items_visible, appear_times):
         hgt = heights[kind]
         ta = appear_times[i] if i < len(appear_times) else -1
         k = 1.0 if ta < 0 else clamp(spring(t - ta - (0.0 if kind != "you" else 0.18)))
+        if y0 < 405:
+            y0 += hgt
+            continue
         if kind == "date":
             if 400 < y0 + 35 < 1650:
-                put_text(f, text, W / 2, y0 + 30, "body", 34, (130, 128, 122), alpha=min(1, k * 1.5))
+                put_text(f, text, W / 2, y0 + 30, "body", 34, (104, 102, 97), alpha=min(1, k * 1.5))
         else:
             b = get_bubble(text, kind == "me")
             bw = b.shape[1]
@@ -134,8 +137,18 @@ def s01(v, t, d):
     vis = 5
     scroll = 316 * (1 - spring(t - BEAT * 1.5))  # the 2026 message lands and pushes the stack up
     zoom = 1.0 + 0.05 * ease_in_out(t / d)
-    chat_stack(f, t, scroll, vis, appear)
+    chat_stack(f, t, scroll - 300, vis, appear)
     chat_header(f)
+    # thumbnail hook: the pair that ends ten years of '언제 한번'
+    band = ui_card(1000, 330, 48, RED, shadow=0.3)
+    place(f, band, W / 2, 1405, band.shape[1])
+    bowl = load_rgba(BOWL_CLOSED["path"])
+    for i, x in enumerate([W / 2 - 300, W / 2 - 40]):
+        place(f, bowl, x, 1415, 300)
+        mx, my = mark_xy(x, 1415, 300)
+        link_mark(f, int(mx), int(my), mark_size(300), heat=0.6 + 0.4 * math.sin(t * 5 + i * 2) ** 2)
+    put_text(f, "혼자선", W / 2 + 290, 1352, "title", 64, (255, 255, 255))
+    put_text(f, "안 열리는 햇반", W / 2 + 290, 1440, "title", 52, YEL)
     # macro push-in
     f = cover(f, W, H, zoom=zoom, cx=0.5, cy=0.62)
     return paper(f, v, t)
@@ -206,9 +219,8 @@ def s03(v, t, d):
     # link marks face each other and light once
     blink = math.exp(-((u - 0.18) / 0.08) ** 2)
     for (x, y) in [(x1, y1), (x2, yfall)]:
-        mx = x + (85 - 380) * bw / 760
-        my = y + (184 - 278) * bw / 760
-        link_mark(f, int(mx), int(my), 18, heat=0.3 * blink, flash=blink)
+        mx, my = mark_xy(x, y, bw)
+        link_mark(f, int(mx), int(my), mark_size(bw), heat=0.3 * blink, flash=blink)
     # clear sleeve sliding off upward
     sl = ease_in_out(u / 0.32)
     sleeve = np.zeros((H, W), np.float32)
@@ -255,50 +267,58 @@ def half_with_bowl(v, name, t, d, z0, z1, cy, lift=0.0, heat=0.0, flash=0.0, tin
     soft_shadow(f, X, oy + s * by, BW * 0.95, BW * 0.16, 0.45)
     place(f, bowl, X, Y, BW, tint=tint)
     k = BW / bowl.shape[1]
-    mx = X + (85 - bowl.shape[1] / 2) * k
-    my = Y + (184 - bowl.shape[0] / 2) * k
-    link_mark(f, int(mx), int(my), max(8, int(22 * k * 1.9)), heat=heat, flash=flash)
+    mx, my = mark_xy(X, Y, BW)
+    link_mark(f, int(mx), int(my), mark_size(BW), heat=heat, flash=flash)
     return f, (X, Y, BW)
 
 
 def s04(v, t, d):
-    """Mirror split: each tries to open alone; the tab springs back with a tiny snap."""
+    """Mirror split: each tries to open alone; the tab lifts 2 mm and springs back with a '톡'.
+    0-0.62 wide, 0.62-1.50 macro on the tab (same beat in both cities), 1.50- wide, marks blink toward the partner."""
+    pull = ease_out((t - 0.80) / 0.25) * (1 - ease_in_out((t - 1.10) / 0.06))
+    over = -math.exp(-(t - 1.16) * 9) * math.sin((t - 1.16) * 40) * 10 if t > 1.16 else 0.0
+    lift = max(0.0, pull * 95 + over)
     f = np.zeros((H, W, 3), np.float32)
-    # tab pull at 0.85 s, snap at 1.15 s (same beat, both cities)
-    pull = ease_out((t - 0.70) / 0.35) * (1 - ease_in_out((t - 1.08) / 0.07))
-    over = 0.0
-    if t > 1.15:
-        over = -math.exp(-(t - 1.15) * 9) * math.sin((t - 1.15) * 40) * 6
-    lift = max(0.0, pull * 46 + over)
+    if 0.62 <= t < 1.50:
+        for i, (name, tint, y0) in enumerate([("S04a", (1.05, 0.96, 0.84), 0), ("S04b", (0.94, 0.98, 1.05), HALF)]):
+            bg = cover(still(v, name), W, HALF, zoom=2.0, cx=0.5, cy=0.86)
+            half = cv2.GaussianBlur(bg, (0, 0), 10) * 0.95
+            bw = 1000 * (1 + 0.06 * (t - 0.62))
+            cx, cy = W / 2 + 20, HALF * 0.50
+            soft_shadow(half, cx, cy + bw * 0.24, bw * 0.95, bw * 0.10, 0.45)
+            place(half, bowl_closed_img(lift=lift), cx, cy, bw, tint=tint)
+            mx, my = mark_xy(cx, cy, bw)
+            bl = math.exp(-((t - 1.30) / 0.05) ** 2)
+            link_mark(half, int(mx), int(my), mark_size(bw), heat=0.15, flash=bl)
+            if t > 1.16:
+                k = pop(t - 1.16)
+                tx, ty = cx + (BOWL_CLOSED["tab"][0] - BOWL_CLOSED["size"][0] / 2) * bw / BOWL_CLOSED["size"][0], \
+                    cy + (BOWL_CLOSED["tab"][1] - BOWL_CLOSED["size"][1] / 2) * bw / BOWL_CLOSED["size"][0]
+                tk = text_rgba("톡", "title", 150, YEL if i == 0 else (255, 255, 255), 9, INK if i == 0 else RED)
+                place(half, tk, tx + 60, ty - 170, tk.shape[1] * (0.5 + 0.5 * k), rot=0.2)
+            f[y0:y0 + HALF] = half
+        f[HALF - 2:HALF + 2] = 1.0
+        return finish(f, t, grain=0.02 if v == "real" else 0.012)
     bl = 0.0
-    for c in (1.35, 1.65):
+    for c in (1.70, 2.00):
         bl = max(bl, math.exp(-((t - c) / 0.06) ** 2))
-    top, (X1, Y1, B1) = half_with_bowl(v, "S04a", t, d, 1.0, 1.10, 0.52, lift=lift, flash=bl, heat=0.15,
-                                        tint=(1.05, 0.96, 0.84))
-    bot, (X2, Y2, B2) = half_with_bowl(v, "S04b", t, d, 1.0, 1.10, 0.52, lift=lift, flash=bl, heat=0.15,
-                                        tint=(0.94, 0.98, 1.05))
+    tt = t if t < 0.62 else t - 0.88
+    top, (X1, Y1, B1) = half_with_bowl(v, "S04a", tt, d, 1.0, 1.10, 0.52, flash=bl, heat=0.15, tint=(1.05, 0.96, 0.84))
+    bot, (X2, Y2, B2) = half_with_bowl(v, "S04b", tt, d, 1.0, 1.10, 0.52, flash=bl, heat=0.15, tint=(0.94, 0.98, 1.05))
     f[:HALF] = top
     f[HALF:] = bot
     f[HALF - 2:HALF + 2] = 1.0
-    # '톡' lettering on the snap (code type, same beat)
-    k = pop(t - 1.15)
-    if t > 1.15:
-        a = clamp(1 - (t - 1.75) * 3)
-        tx1, ty1 = X1 - B1 * 0.42, Y1 + B1 * 0.05
-        tk = text_rgba("톡", "title", 130, YEL, 8, INK)
-        place(f, tk, tx1 - 30, Y1 - B1 * 0.30, tk.shape[1] * (0.5 + 0.5 * k), rot=0.2, alpha=a)
-        tk2 = text_rgba("톡", "title", 130, (255, 255, 255), 8, RED)
-        place(f, tk2, X2 + B2 * 0.40, HALF + Y2 - B2 * 0.62, tk2.shape[1] * (0.5 + 0.5 * k), rot=0.2, alpha=a)
-    # link mark points to its partner: tiny chevrons up / down on blinks
     if bl > 0.05:
-        for (x, y, dirn) in [(X1, Y1, 1), (X2, HALF + Y2, -1)]:
-            k2 = B1 / 760
-            mx = x + (85 - 380) * k2
-            my = y + (184 - 278) * k2 + dirn * 60
+        for (x, y, B, dirn) in [(X1, Y1, B1, 1), (X2, HALF + Y2, B2, -1)]:
+            mx, my = mark_xy(x, y, B)
+            my = my + dirn * 50
             pts = np.array([[mx - 16, my - dirn * 10], [mx, my + dirn * 8], [mx + 16, my - dirn * 10]], np.int32)
             cv2.polylines(f, [pts], False, tuple(float(x) * bl for x in c01(AMBER)), 5, cv2.LINE_AA)
-    put_text(f, "서울 21:00", 150, 300, "body", 38, (245, 245, 245), anchor="lm")
-    put_text(f, "뉴욕 08:00", 150, HALF + 70, "body", 38, (250, 250, 250), anchor="lm")
+    put_text(f, "서울 21:00", 150, 300, "body", 38, (245, 245, 245), anchor="lm", stroke=2, stroke_color=SEOUL)
+    put_text(f, "뉴욕 08:00", 150, HALF + 70, "body", 38, (250, 250, 250), anchor="lm", stroke=2, stroke_color=SEOUL)
+    if t > 1.5:
+        put_text(f, "혼자서는 안 열려요", W / 2, HALF, "title", 64, YEL, alpha=clamp((t - 1.55) * 4), stroke=6,
+                 stroke_color=INK)
     return finish(f, t, grain=0.02 if v == "real" else 0.012)
 
 
@@ -422,7 +442,7 @@ def peel_half(v, t, warm, seed):
     bgc = cover(bg, W, HALF, zoom=2.4, cx=0.5, cy=0.88)
     bgc = cv2.GaussianBlur(bgc, (0, 0), 14)
     half[:] = bgc * 0.9
-    bw = 760 * (1 + 0.16 * ease_in_out(t / 2.67))
+    bw = 760 * (1 + 0.16 * (t / 2.67))
     cx, cy = W / 2, HALF * 0.52
     closed = load_rgba(BOWL_CLOSED["path"])
     opened = load_rgba(BOWL_OPEN["path"])
@@ -430,15 +450,14 @@ def peel_half(v, t, warm, seed):
     soft_shadow(half, cx, cy + bw * 0.33, bw * 0.95, bw * 0.12, 0.5)
     p = ease_in_out((t - 0.35) / 0.75)  # peel progress
     # open state underneath (scaled to the same container width)
-    ow = bw * 1.04
-    lay_o = np.zeros_like(half)
-    lay_o[:] = half
-    place(lay_o, opened, cx + bw * 0.02, cy + bw * 0.03, ow, tint=tint)
+    lay_o = half.copy()
+    ox_, oy_ = open_center(cx, cy, bw)
+    place(lay_o, opened, ox_, oy_, bw, tint=tint)
     lay_c = half.copy()
     place(lay_c, closed, cx, cy, bw, tint=tint)
     k = bw / closed.shape[1]
-    link_mark(lay_c, int(cx + (85 - closed.shape[1] / 2) * k), int(cy + (184 - closed.shape[0] / 2) * k),
-              int(32 * k * 1.9), heat=1.0)
+    mx, my = mark_xy(cx, cy, bw)
+    link_mark(lay_c, int(mx), int(my), mark_size(bw), heat=1.0)
     if p <= 0:
         out = lay_c
     else:
@@ -487,12 +506,12 @@ def s08(v, t, d):
 def s09(v, t, d):
     """Signature 1: steam columns gather on the seam and melt it (fbm threshold mask)."""
     a = s08(v, t + 2.67, 2.67)
-    b = table_frame(v, 0.0, 2.67, zoom=1.30 - 0.14 * ease_in_out(t / d))
+    b = table_frame(v, 0.0, 2.67, zoom=1.30 - 0.14 * (t / d))
     n = fbm(H, W, seed=5)
     dist = np.abs(np.arange(H, dtype=np.float32) - HALF)[:, None] / (H * 0.5)
-    field = dist + 0.35 * (n - 0.5)
-    thr = -0.12 + 1.35 * ease_in_out(t / (d * 0.92))
-    soft = 0.06
+    field = dist + 0.16 * (cv2.GaussianBlur(n, (0, 0), 12) - 0.5)
+    thr = -0.10 + 1.25 * ease_in_out(t / (d * 0.92))
+    soft = 0.16
     m = np.clip((thr - field) / soft, 0, 1)
     edge = np.clip(1 - np.abs(thr - field) / 0.07, 0, 1) * (thr < 1.2)
     edge = cv2.GaussianBlur(edge, (0, 0), 9)
@@ -511,7 +530,7 @@ def s09(v, t, d):
 
 def table_frame(v, t, d, zoom=None):
     name = "S10"
-    z = zoom if zoom is not None else 1.16 - 0.16 * ease_in_out(t / d)
+    z = zoom if zoom is not None else 1.16 - 0.16 * (0.5 * t / d + 0.5 * ease_in_out(t / d))
     img = still(v, name)
     f = cover(img, W, H, zoom=z, cx=0.5, cy=0.56)
     # the two lights meet softly on the centre line (blend the hard seam of the still)
@@ -519,6 +538,9 @@ def table_frame(v, t, d, zoom=None):
     xs = np.arange(W, dtype=np.float32)
     bm = np.clip(1 - np.abs(xs - W / 2) / 70, 0, 1)[None, :, None]
     f = f * (1 - bm) + blur * bm
+    grade = np.clip((xs - W / 2) / 90 + 0.5, 0, 1)[None, :, None]
+    warm, cool = np.array([1.06, 0.97, 0.86], np.float32), np.array([0.94, 0.99, 1.07], np.float32)
+    f = np.clip(f * (warm * (1 - grade) + cool * grade), 0, 1)
     s, ox, oy = still_to_frame(name, v, W, H, z, 0.5, 0.56)
     opened = load_rgba(BOWL_OPEN["path"])
     for i, (bx, by, bw) in enumerate(PLACE[f"{name}_{v}"]):
@@ -574,14 +596,16 @@ def s12(v, t, d):
             X, BW = ox + s * bx, s * bw
             is_open = t >= t_open
             src = opened if is_open else closed
-            hh = src.shape[0] * bw / src.shape[1]
+            hh = closed.shape[0] * bw / closed.shape[1]
             Y = oy + s * (by - hh / 2)
+            if is_open:
+                Y = open_center(X, Y, BW)[1]
             soft_shadow(band, X, oy + s * by, BW * 0.9, BW * 0.14, 0.4)
             place(band, src, X, Y + (1 - k_in) * 40, BW, alpha=clamp(k_in * 2))
             if not is_open:
                 kk = BW / closed.shape[1]
-                link_mark(band, int(X + (85 - closed.shape[1] / 2) * kk), int(Y + (184 - closed.shape[0] / 2) * kk),
-                          max(6, int(22 * kk * 1.9)), heat=clamp((t - t_open + 0.4) / 0.4))
+                mx, my = mark_xy(X, Y, BW)
+                link_mark(band, int(mx), int(my), mark_size(BW), heat=clamp((t - t_open + 0.4) / 0.4))
             band = steam(band, t, t_open, [(X, Y - BW * 0.15, BW * 0.5)], seed=60 + r * 2 + i, n=40, strength=0.9,
                          rise=180, spread=30, cotton=(v == "mini"), burst=True, max_age=1.4)
         # vertical seam melts after opening
@@ -594,6 +618,10 @@ def s12(v, t, d):
             band[:, W // 2 - 2:W // 2 + 2] = 1.0
         else:
             band = band * (1 - mm[..., None] * 0.6) + mm[..., None] * np.array([1.0, 0.97, 0.92], np.float32) * 0.6
+        lab = ["기숙사 ↔ 고향 집", "할머니 ↔ 손주", "야근 사무실 ↔ 친구"][r]
+        chip = ui_card(int(text_width(lab, "body", 40) + 60), 70, 35, (250, 249, 245), shadow=0.25)
+        place(band, chip, W / 2, 70 if r else 300, chip.shape[1], alpha=clamp(k_in * 2))
+        put_text(band, lab, W / 2, 70 if r else 300, "body", 40, INK, alpha=clamp(k_in * 2))
         f[r * bh:(r + 1) * bh] = band
         if r > 0:
             f[r * bh - 3:r * bh + 3] = c01(RICE)
@@ -621,6 +649,11 @@ def facet_bowl(dst, cx, cy, R, h_ratio=0.42, tilt=0.42, col=(1, 1, 1), lw=4, fil
     for i in range(n):
         if math.sin(th[i]) > -0.05:
             cv2.line(dst, tuple(top[i].astype(int)), tuple(bot[i].astype(int)), col, max(2, lw - 1), cv2.LINE_AA)
+        else:  # back facets, faint, so all 20 read
+            ov = dst.copy()
+            cv2.line(ov, tuple(top[i].astype(int)), tuple(bot[i].astype(int)), col, 1, cv2.LINE_AA)
+            dst[:] = dst * 0.6 + ov * 0.4
+    cv2.polylines(dst, [bot.astype(np.int32)], True, col, 1, cv2.LINE_AA)
     cv2.polylines(dst, [bot[np.sin(th) > -0.2].astype(np.int32)], False, col, lw, cv2.LINE_AA)
     return dst
 
@@ -731,7 +764,8 @@ def s15(v, t, d):
         soft_shadow(f, x, y + 150, 380, 60, 0.35)
         place(f, bowl, x, y, 400, alpha=min(1, kb * 2))
         kk = 400 / bowl.shape[1]
-        link_mark(f, int(x + (85 - bowl.shape[1] / 2) * kk), int(y + (184 - bowl.shape[0] / 2) * kk), 22,
+        mx, my = mark_xy(x, y, 400)
+        link_mark(f, int(mx), int(my), mark_size(400),
                   heat=1.0, flash=0.4 + 0.3 * math.sin(t * 4 + i * 3))
     k2 = pop(t - 0.5)
     t2 = halftone_text("햇반 같이밥", 104)

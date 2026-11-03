@@ -145,5 +145,7 @@ def resolve_logos():
 
 if __name__ == "__main__":
     product_closed(); product_side(); product_open(); lid_front(); logos()
+    import closed210
+    closed210.build()
     for p in sorted(OUT.glob("*.png")):
         print(p.name, Image.open(p).size)
