@@ -60,9 +60,7 @@ def paper(frame, v, t):
 # =================================================================== chat UI
 CHAT_LOG = [
     ("2016. 3. 2.", "언제 밥 한번 먹자", "ㅇㅇ 언제 한번 ㅋㅋ"),
-    ("2018. 9. 14.", "언제 밥 한번 먹자", "ㅇㅇ 언제 한번 ㅋㅋ"),
-    ("2021. 12. 24.", "언제 밥 한번 먹자", "ㅇㅇ 언제 한번 ㅋㅋ"),
-    ("2024. 5. 8.", "언제 밥 한번 먹자", "ㅇㅇ 언제 한번 ㅋㅋ"),
+    ("2021. 5. 8.", "언제 밥 한번 먹자", "ㅇㅇ 언제 한번 ㅋㅋ"),
     ("2026. 11. 13.", "언제 밥 한번 먹자", "ㅇㅇ 언제 한번 ㅋㅋ"),
 ]
 
@@ -106,19 +104,19 @@ def chat_stack(f, t, scroll, items_visible, appear_times):
         rows.append(("me", a, i))
         rows.append(("you", b, i))
     # lay out top->bottom from a start computed backward
-    heights = {"date": 60, "me": 128, "you": 128}
+    heights = {"date": 44, "me": 118, "you": 118}
     total = sum(heights[r[0]] for r in rows)
     y0 = y - total
     for kind, text, i in rows:
         hgt = heights[kind]
         ta = appear_times[i] if i < len(appear_times) else -1
-        k = 1.0 if ta < 0 else clamp(spring(t - ta - (0.0 if kind != "you" else 0.18)))
+        k = 1.0 if (ta < 0 or kind != "you") else clamp(spring(t - ta))
         if y0 < 405:
             y0 += hgt
             continue
         if kind == "date":
             if 400 < y0 + 35 < 1650:
-                put_text(f, text, W / 2, y0 + 30, "body", 34, (104, 102, 97), alpha=min(1, k * 1.5))
+                put_text(f, text, W / 2, y0 + 22, "body", 32, (96, 94, 89), alpha=min(1, k * 1.5))
         else:
             b = get_bubble(text, kind == "me")
             bw = b.shape[1]
@@ -133,22 +131,24 @@ def chat_stack(f, t, scroll, items_visible, appear_times):
 def s01(v, t, d):
     f = np.ones((H, W, 3), np.float32) * c01(RICE)
     # chat already complete at frame 0 (thumbnail); 2024 & 2026 entries land on beats
-    appear = [-1, -1, -1, -1, BEAT * 1.5]
-    vis = 5
-    scroll = 316 * (1 - spring(t - BEAT * 1.5))  # the 2026 message lands and pushes the stack up
+    appear = [-1, -1, BEAT * 1.5]  # 2026: the same reply lands again on the beat
     zoom = 1.0 + 0.05 * ease_in_out(t / d)
-    chat_stack(f, t, scroll - 300, vis, appear)
+    chat_stack(f, t, -262, 3, appear)
     chat_header(f)
+    lg1 = load_rgba(str(LOGO1)).copy(); lg1[..., :3] = c01(RED)
+    lg2 = load_rgba(str(LOGO2)).copy(); lg2[..., :3] = c01(RED)
+    place(f, lg1, W - 250, 325, 92)
+    place(f, lg2, W - 135, 325, 98)
     # thumbnail hook: the pair that ends ten years of '언제 한번'
-    band = ui_card(1000, 330, 48, RED, shadow=0.3)
-    place(f, band, W / 2, 1405, band.shape[1])
+    band = ui_card(1000, 270, 48, RED, shadow=0.3)
+    place(f, band, W / 2, 1420, band.shape[1])
     bowl = load_rgba(BOWL_CLOSED["path"])
     for i, x in enumerate([W / 2 - 300, W / 2 - 40]):
-        place(f, bowl, x, 1415, 300)
-        mx, my = mark_xy(x, 1415, 300)
+        place(f, bowl, x, 1425, 300)
+        mx, my = mark_xy(x, 1425, 300)
         link_mark(f, int(mx), int(my), mark_size(300), heat=0.6 + 0.4 * math.sin(t * 5 + i * 2) ** 2)
-    put_text(f, "혼자선", W / 2 + 290, 1352, "title", 64, (255, 255, 255))
-    put_text(f, "안 열리는 햇반", W / 2 + 290, 1440, "title", 52, YEL)
+    put_text(f, "혼자선", W / 2 + 290, 1380, "title", 64, (255, 255, 255))
+    put_text(f, "안 열리는 햇반", W / 2 + 290, 1462, "title", 52, YEL)
     # macro push-in
     f = cover(f, W, H, zoom=zoom, cx=0.5, cy=0.62)
     return paper(f, v, t)
@@ -170,7 +170,7 @@ def s03(v, t, d):
     """Typing 'let's eat sometime' -> delete -> press '같이밥 보내기' -> pair box splits."""
     f = np.ones((H, W, 3), np.float32) * c01(RICE)
     if t < 1.05:
-        chat_stack(f, 0, -360, 5, [])
+        chat_stack(f, 0, -360, 3, [])
         chat_header(f)
         # input bar
         bar = ui_card(940, 110, 55, (255, 255, 255), shadow=0.18)
@@ -237,8 +237,8 @@ def s03(v, t, d):
         cv2.line(line, (W // 2 - lw // 2, HALF), (W // 2 + lw // 2, HALF), 1, 4, cv2.LINE_AA)
         line = cv2.GaussianBlur(line, (0, 0), 2)
         f = f * (1 - line[..., None]) + line[..., None] * np.array([1, 1, 1], np.float32)
-    put_text(f, "서울 21:00", 150, 330, "body", 40, (240, 240, 240), alpha=split, anchor="lm")
-    put_text(f, "뉴욕 08:00", 150, HALF + 90, "body", 40, INK, alpha=split, anchor="lm")
+    if split > 0.05:
+        city_labels(f, alpha=split)
     return paper(f, v, t)
 
 
@@ -314,12 +314,19 @@ def s04(v, t, d):
             my = my + dirn * 50
             pts = np.array([[mx - 16, my - dirn * 10], [mx, my + dirn * 8], [mx + 16, my - dirn * 10]], np.int32)
             cv2.polylines(f, [pts], False, tuple(float(x) * bl for x in c01(AMBER)), 5, cv2.LINE_AA)
-    put_text(f, "서울 21:00", 150, 300, "body", 38, (245, 245, 245), anchor="lm", stroke=2, stroke_color=SEOUL)
-    put_text(f, "뉴욕 08:00", 150, HALF + 70, "body", 38, (250, 250, 250), anchor="lm", stroke=2, stroke_color=SEOUL)
+    city_labels(f)
     if t > 1.5:
         put_text(f, "혼자서는 안 열려요", W / 2, HALF, "title", 64, YEL, alpha=clamp((t - 1.55) * 4), stroke=6,
                  stroke_color=INK)
     return finish(f, t, grain=0.02 if v == "real" else 0.012)
+
+
+def city_labels(f, alpha=1.0):
+    for (txt, y, bg, fg) in [("서울 21:00", 310, SEOUL, (255, 255, 255)), ("뉴욕 08:00", HALF + 80, (250, 249, 245), INK)]:
+        pill = ui_card(int(text_width(txt, "title", 52) + 64), 84, 42, bg, shadow=0.3)
+        place(f, pill, 70 + pill.shape[1] / 2 - 30, y, pill.shape[1], alpha=alpha)
+        put_text(f, txt, 70 + pill.shape[1] / 2 - 30, y, "title", 52, fg, alpha=alpha)
+    return f
 
 
 def s05(v, t, d):
@@ -333,16 +340,15 @@ def s05(v, t, d):
     # phone cards
     for i, (cy, who, msg, ta) in enumerate([(HALF * 0.55, "서연", "지금?", 0.15), (HALF + HALF * 0.45, "준호", "지금.", 0.15 + BEAT)]):
         k = spring(t - (0.0 if i == 0 else 0.1))
-        card = ui_card(640, 380, 44, (250, 249, 245), shadow=0.35)
+        card = ui_card(560, 330, 44, (250, 249, 245), shadow=0.35)
         cy = cy - 50 * ease_in_out(t / d) * (1 if i == 0 else -1)
         place(f, card, W / 2, cy + (1 - k) * 120, card.shape[1], alpha=min(1, k * 2))
         if k > 0.3:
-            put_text(f, who, W / 2 - 250, cy - 120 + (1 - k) * 120, "body", 34, (120, 120, 120), anchor="lm")
+            put_text(f, who, W / 2 - 220, cy - 110 + (1 - k) * 120, "body", 40, (90, 90, 90), anchor="lm")
             kb = spring(t - ta)
-            b = get_bubble(msg, i == 0, 72)
+            b = get_bubble(msg, True, 104)  # each phone shows its own sent message
             place(f, b, W / 2, cy + 30 + (1 - k) * 120 + (1 - kb) * 40, b.shape[1] * (0.8 + 0.2 * kb), alpha=min(1, kb * 2))
-    put_text(f, "서울 21:00", 150, 300, "body", 38, (245, 245, 245), anchor="lm")
-    put_text(f, "뉴욕 08:00", 150, HALF + 70, "body", 38, (250, 250, 250), anchor="lm")
+    city_labels(f)
     return finish(f, t, grain=0.02, halation=0.06)
 
 
@@ -511,7 +517,7 @@ def s09(v, t, d):
     dist = np.abs(np.arange(H, dtype=np.float32) - HALF)[:, None] / (H * 0.5)
     field = dist + 0.16 * (cv2.GaussianBlur(n, (0, 0), 12) - 0.5)
     thr = -0.10 + 1.25 * ease_in_out(t / (d * 0.92))
-    soft = 0.16
+    soft = 0.045
     m = np.clip((thr - field) / soft, 0, 1)
     edge = np.clip(1 - np.abs(thr - field) / 0.07, 0, 1) * (thr < 1.2)
     edge = cv2.GaussianBlur(edge, (0, 0), 9)
@@ -546,7 +552,7 @@ def table_frame(v, t, d, zoom=None):
     for i, (bx, by, bw) in enumerate(PLACE[f"{name}_{v}"]):
         bh = opened.shape[0] * bw / opened.shape[1]
         X, Y, BW = ox + s * bx, oy + s * (by - bh / 2), s * bw
-        soft_shadow(f, X, oy + s * by, BW * 0.9, BW * 0.14, 0.4)
+        soft_shadow(f, X, oy + s * by, BW * 0.95, BW * 0.18, 0.62)
         o = opened[:, ::-1] if i == 1 else opened
         place(f, o, X, Y, BW, tint=(1.04, 0.96, 0.86) if i == 0 else (0.95, 0.99, 1.04))
         f = steam(f, t + 1.0, 0.0, [(X, Y - BW * 0.1, BW * 0.5)], seed=51 + i, n=40, strength=0.55, rise=170,
@@ -600,7 +606,7 @@ def s12(v, t, d):
             Y = oy + s * (by - hh / 2)
             if is_open:
                 Y = open_center(X, Y, BW)[1]
-            soft_shadow(band, X, oy + s * by, BW * 0.9, BW * 0.14, 0.4)
+            soft_shadow(band, X, oy + s * by, BW * 0.95, BW * 0.18, 0.62)
             place(band, src, X, Y + (1 - k_in) * 40, BW, alpha=clamp(k_in * 2))
             if not is_open:
                 kk = BW / closed.shape[1]
@@ -619,9 +625,9 @@ def s12(v, t, d):
         else:
             band = band * (1 - mm[..., None] * 0.6) + mm[..., None] * np.array([1.0, 0.97, 0.92], np.float32) * 0.6
         lab = ["기숙사 ↔ 고향 집", "할머니 ↔ 손주", "야근 사무실 ↔ 친구"][r]
-        chip = ui_card(int(text_width(lab, "body", 40) + 60), 70, 35, (250, 249, 245), shadow=0.25)
-        place(band, chip, W / 2, 70 if r else 300, chip.shape[1], alpha=clamp(k_in * 2))
-        put_text(band, lab, W / 2, 70 if r else 300, "body", 40, INK, alpha=clamp(k_in * 2))
+        chip = ui_card(int(text_width(lab, "title", 56) + 70), 92, 46, (250, 249, 245), shadow=0.3)
+        place(band, chip, W / 2, 80 if r else 310, chip.shape[1], alpha=clamp(k_in * 2))
+        put_text(band, lab, W / 2, 80 if r else 310, "title", 56, INK, alpha=clamp(k_in * 2))
         f[r * bh:(r + 1) * bh] = band
         if r > 0:
             f[r * bh - 3:r * bh + 3] = c01(RICE)
@@ -707,7 +713,7 @@ def s14(v, t, d):
     f = np.ones((H, W, 3), np.float32) * c01(RICE)
     # callback: the ten years of empty promises drift up behind, faded
     ghost = np.ones((H, W, 3), np.float32) * c01(RICE)
-    chat_stack(ghost, 0, 316 - 420 * ease_in_out(t / d), 5, [])
+    chat_stack(ghost, 0, 200 - 420 * ease_in_out(t / d), 3, [])
     f = f * 0.84 + cv2.GaussianBlur(ghost, (0, 0), 2.5) * 0.16
     size = 76
     stages = [
@@ -746,7 +752,7 @@ def s14(v, t, d):
 
 def s15(v, t, d):
     f = kv_background().copy()
-    f = gold_trail(f, t, -0.4, 1.4, cy=H * 0.40, rx=470, ry=150, phase=1.2, width=6)
+    f = gold_trail(f, t, -0.4, 1.4, cy=H * 0.53, rx=480, ry=150, phase=1.2, width=6)
     l1 = load_rgba(str(LOGO1))
     l2 = load_rgba(str(LOGO2))
     # logos inside safe area top (y > 250)
@@ -767,6 +773,10 @@ def s15(v, t, d):
         mx, my = mark_xy(x, y, 400)
         link_mark(f, int(mx), int(my), mark_size(400),
                   heat=1.0, flash=0.4 + 0.3 * math.sin(t * 4 + i * 3))
+    kb = spring(t - 0.45)
+    sleeve = ui_card(860, 74, 37, SEOUL, shadow=0.3)
+    place(f, sleeve, W / 2, 1150, sleeve.shape[1], alpha=clamp(kb * 2))
+    put_text(f, "같이밥 페어 · 둘이 같이 열어요", W / 2, 1150, "body", 40, (255, 255, 255), alpha=clamp(kb * 2))
     k2 = pop(t - 0.5)
     t2 = halftone_text("햇반 같이밥", 104)
     place(f, t2, W / 2, 1360, t2.shape[1] * (0.8 + 0.2 * k2), alpha=min(1, k2 * 2))

@@ -92,7 +92,7 @@ def slide2():
     exploded(f, 360, 800, 210, 9.0, labels=True, size=40)
     # facts vs concept
     card = ui_card(940, 250, 36, (255, 255, 255), shadow=0.2)
-    place(f, card, CW / 2, 1150, card.shape[1])
+    place(f, card, CW / 2, 1125, card.shape[1])
     put_text(f, "실제", 120, 1080, "title", 40, RED, anchor="lm")
     put_text(f, "4중 차단 필름 · 3중 차단 용기 · 20각 내압 구조", 230, 1080, "body", 34, INK, anchor="lm")
     put_text(f, "콘셉트", 120, 1160, "title", 40, (0xB0, 0x60, 0x10), anchor="lm")

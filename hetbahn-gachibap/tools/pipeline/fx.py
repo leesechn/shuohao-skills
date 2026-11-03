@@ -403,11 +403,13 @@ def link_mark(dst, x, y, size, heat=0.0, flash=0.0, rot=-0.35):
     em[2:, 2:] = m[:-2, :-2]  # emboss shadow
     region = dst[y0:y0 + 2 * s, x0:x0 + 2 * s]
     region *= (1 - 0.18 * np.clip(em - m, 0, 1))[..., None]
-    g = heat * 0.55 + flash * 0.7
+    g = heat * 0.12 + flash * 0.30  # a printed mark that warms up, not a glowing orb
     if g > 0:
-        halo = cv2.GaussianBlur(m, (0, 0), size * 0.55) * g
-        region += halo[..., None] * c01(AMBER) * 0.9
+        halo = cv2.GaussianBlur(m, (0, 0), size * 0.30) * g
+        region += halo[..., None] * c01(AMBER) * 0.6
     region[:] = region * (1 - m[..., None]) + col * m[..., None]
+    edge = np.clip(m - cv2.erode(m, np.ones((3, 3), np.uint8)), 0, 1)
+    region[:] = region * (1 - edge[..., None] * 0.6) + c01((0xB8, 0x6A, 0x10)) * edge[..., None] * 0.6
     hl = np.zeros_like(m)
     cv2.ellipse(hl, (s - int(size * 0.12), s - int(size * 0.3)), (max(1, int(size * 0.1)), max(1, int(size * 0.22))),
                 math.degrees(rot), 0, 360, 1.0, -1, cv2.LINE_AA)
