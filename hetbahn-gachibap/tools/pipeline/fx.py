@@ -391,7 +391,7 @@ def steam(dst, t, t0, sources, seed=11, n=140, strength=1.0, rise=320, spread=60
 def link_mark(dst, x, y, size, heat=0.0, flash=0.0, rot=-0.35):
     """Embossed rice-grain mark next to the red badge; ivory -> amber (thermochromic concept)."""
     col = c01(IVORY) * (1 - heat) + c01(AMBER) * heat
-    col = np.clip(col + flash * 0.25, 0, 1)
+    col = np.clip(col * (1 - 0.25 * flash) + c01((0xD9, 0x5B, 0x10)) * 0.25 * flash, 0, 1)
     s = int(size * 2.4)
     x0, y0 = int(x - s), int(y - s)
     if x0 < 0 or y0 < 0 or x0 + 2 * s > dst.shape[1] or y0 + 2 * s > dst.shape[0]:
@@ -403,17 +403,17 @@ def link_mark(dst, x, y, size, heat=0.0, flash=0.0, rot=-0.35):
     em[2:, 2:] = m[:-2, :-2]  # emboss shadow
     region = dst[y0:y0 + 2 * s, x0:x0 + 2 * s]
     region *= (1 - 0.18 * np.clip(em - m, 0, 1))[..., None]
-    g = heat * 0.12 + flash * 0.30  # a printed mark that warms up, not a glowing orb
+    g = 0.0  # printed thermochromic mark: colour change only, no glow
     if g > 0:
         halo = cv2.GaussianBlur(m, (0, 0), size * 0.30) * g
         region += halo[..., None] * c01(AMBER) * 0.6
     region[:] = region * (1 - m[..., None]) + col * m[..., None]
     edge = np.clip(m - cv2.erode(m, np.ones((3, 3), np.uint8)), 0, 1)
     region[:] = region * (1 - edge[..., None] * 0.6) + c01((0xB8, 0x6A, 0x10)) * edge[..., None] * 0.6
-    hl = np.zeros_like(m)
+    hl = np.zeros_like(m) if False else np.zeros_like(m)
     cv2.ellipse(hl, (s - int(size * 0.12), s - int(size * 0.3)), (max(1, int(size * 0.1)), max(1, int(size * 0.22))),
                 math.degrees(rot), 0, 360, 1.0, -1, cv2.LINE_AA)
-    region += cv2.GaussianBlur(hl, (0, 0), 1.0)[..., None] * 0.35
+    region += cv2.GaussianBlur(hl, (0, 0), 1.0)[..., None] * 0.08
     np.clip(region, 0, 1, out=region)
     return dst
 

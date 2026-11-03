@@ -221,15 +221,10 @@ def s03(v, t, d):
     for (x, y) in [(x1, y1), (x2, yfall)]:
         mx, my = mark_xy(x, y, bw)
         link_mark(f, int(mx), int(my), mark_size(bw), heat=0.3 * blink, flash=blink)
-    # clear sleeve sliding off upward
-    sl = ease_in_out(u / 0.32)
-    sleeve = np.zeros((H, W), np.float32)
-    sy = int(H * 0.5 - 220 - sl * 1100)
-    cv2.rectangle(sleeve, (W // 2 - 500, sy), (W // 2 + 500, sy + 440), 1, -1)
-    sleeve = cv2.GaussianBlur(sleeve, (0, 0), 3)
-    f += sleeve[..., None] * 0.035
-    edge = np.abs(cv2.Sobel(sleeve, cv2.CV_32F, 0, 1)) + np.abs(cv2.Sobel(sleeve, cv2.CV_32F, 1, 0))
-    f += np.clip(edge * 2, 0, 0.5)[..., None]
+    # the 같이밥 sleeve binds the pair, then slides off sideways
+    sl = ease_in_out(u / 0.30)
+    if sl < 0.999:
+        pair_sleeve(f, W / 2 + sl * 1200, H * 0.5 + 40, 900, 96, "같이밥", "둘이 같이 열어요", col=RED)
     # fall trajectory -> becomes the split line
     if p > 0.05:
         line = np.zeros((H, W), np.float32)
@@ -277,7 +272,7 @@ def s04(v, t, d):
     0-0.62 wide, 0.62-1.50 macro on the tab (same beat in both cities), 1.50- wide, marks blink toward the partner."""
     pull = ease_out((t - 0.80) / 0.25) * (1 - ease_in_out((t - 1.10) / 0.06))
     over = -math.exp(-(t - 1.16) * 9) * math.sin((t - 1.16) * 40) * 10 if t > 1.16 else 0.0
-    lift = max(0.0, pull * 95 + over)
+    lift = max(0.0, pull * 70 + over)
     f = np.zeros((H, W, 3), np.float32)
     if 0.62 <= t < 1.50:
         for i, (name, tint, y0) in enumerate([("S04a", (1.05, 0.96, 0.84), 0), ("S04b", (0.94, 0.98, 1.05), HALF)]):
@@ -316,8 +311,10 @@ def s04(v, t, d):
             cv2.polylines(f, [pts], False, tuple(float(x) * bl for x in c01(AMBER)), 5, cv2.LINE_AA)
     city_labels(f)
     if t > 1.5:
-        put_text(f, "혼자서는 안 열려요", W / 2, HALF, "title", 64, YEL, alpha=clamp((t - 1.55) * 4), stroke=6,
-                 stroke_color=INK)
+        al = clamp((t - 1.55) * 4)
+        pill = ui_card(int(text_width("혼자서는 안 열려요", "title", 60) + 80), 100, 50, INK, shadow=0.3)
+        place(f, pill, W / 2, HALF - 110, pill.shape[1], alpha=al)
+        put_text(f, "혼자서는 안 열려요", W / 2, HALF - 110, "title", 60, YEL, alpha=al)
     return finish(f, t, grain=0.02 if v == "real" else 0.012)
 
 
@@ -455,7 +452,7 @@ def peel_half(v, t, warm, seed):
     tint = (1.05, 0.96, 0.85) if warm else (0.95, 0.99, 1.05)
     soft_shadow(half, cx, cy + bw * 0.25, bw * 0.98, bw * 0.12, 0.6)
     p = ease_in_out((t - 0.45) / 0.70)  # peel progress (after the tab lifts)
-    pre = ease_out((t - 0.12) / 0.30) * 95 if t < 0.55 else 95
+    pre = ease_out((t - 0.12) / 0.30) * 55 if t < 0.55 else 55
     # open state underneath (scaled to the same container width)
     lay_o = half.copy()
     ox_, oy_ = open_center(cx, cy, bw)
@@ -499,7 +496,7 @@ def peel_half(v, t, warm, seed):
                 sparkle(out, sx, sy, 10 + rng.uniform(0, 8), 0.8)
     # steam burst 0.4 s then column
     out = steam(out, t, 0.75, [(cx + bw * 0.14, cy - bw * 0.02, bw * 0.42)], seed=seed, n=190, strength=1.3,
-                rise=150, spread=55, cotton=(v == "mini"), burst=True, max_age=2.0)
+                rise=150, spread=55, cotton=False, burst=True, max_age=2.0)
     return out
 
 
@@ -512,27 +509,26 @@ def s08(v, t, d):
 
 
 def s09(v, t, d):
-    """Signature 1: steam columns gather on the seam and melt it (fbm threshold mask)."""
+    """Signature 1: the two steam columns rise into one veil that covers the seam; when it clears,
+    the two halves have become one table (switch happens behind the veil, no hard mask edge)."""
     a = s08(v, t + 2.67, 2.67)
     b = table_frame(v, 0.0, 2.67, zoom=1.30 - 0.14 * (t / d))
     n = fbm(H, W, seed=5)
-    dist = np.abs(np.arange(H, dtype=np.float32) - HALF)[:, None] / (H * 0.5)
-    field = dist + 0.16 * (cv2.GaussianBlur(n, (0, 0), 12) - 0.5)
-    thr = -0.10 + 1.25 * ease_in_out(t / (d * 0.92))
-    soft = 0.045
-    m = np.clip((thr - field) / soft, 0, 1)
-    edge = np.clip(1 - np.abs(thr - field) / 0.07, 0, 1) * (thr < 1.2)
-    edge = cv2.GaussianBlur(edge, (0, 0), 9)
-    f = a * (1 - m[..., None]) + b * m[..., None]
-    f = f * (1 - edge[..., None] * 0.55) + edge[..., None] * np.array([1.0, 0.98, 0.94], np.float32) * 0.55
-    # light motes travelling along the steam between the halves (tiny, not orbs)
+    n2 = cv2.GaussianBlur(n, (0, 0), 25)
+    veil = math.exp(-((t - 1.15) / 0.55) ** 2)  # steam density over time
+    yy = np.abs(np.arange(H, dtype=np.float32) - HALF)[:, None] / HALF
+    # steam gathers on the seam first, then fills the frame
+    spread = clamp(t / 1.0)
+    dens = np.clip(veil * (1.15 - yy / max(spread, 0.05) * 0.9) * (0.75 + 0.5 * n2), 0, 1)
+    sw = ease_in_out((t - 0.85) / 0.6)
+    f = a * (1 - sw) + b * sw
+    steamcol = np.array([0.98, 0.97, 0.95], np.float32)
+    f = f * (1 - dens[..., None] * 0.92) + steamcol * dens[..., None] * 0.92
     rng = np.random.default_rng(9)
-    for i in range(40):
-        ph = rng.uniform(0, 1)
+    for i in range(30):
         x = rng.uniform(150, W - 150)
-        yph = (ph + t * 0.45 * (1 if i % 2 else -1)) % 1.0
-        y = HALF + (yph - 0.5) * 900
-        sparkle(f, x + math.sin(t * 3 + i) * 20, y, 8, 0.6 * clamp(t * 2) * (1 - clamp((t - 2.2) * 2)))
+        yph = (rng.uniform(0, 1) + t * 0.45 * (1 if i % 2 else -1)) % 1.0
+        sparkle(f, x + math.sin(t * 3 + i) * 20, HALF + (yph - 0.5) * 900, 7, 0.5 * clamp(t * 2) * (1 - clamp((t - 2.2) * 2)))
     return finish(np.clip(f, 0, 1), t, grain=0.02, halation=0.12)
 
 
@@ -558,7 +554,7 @@ def table_frame(v, t, d, zoom=None):
         o = opened[:, ::-1] if i == 1 else opened
         place(f, o, X, Y, BW, tint=(1.04, 0.96, 0.86) if i == 0 else (0.95, 0.99, 1.04))
         f = steam(f, t + 1.0, 0.0, [(X, Y - BW * 0.1, BW * 0.5)], seed=51 + i, n=40, strength=0.55, rise=170,
-                  spread=30, cotton=(v == "mini"), burst=False, max_age=1.8)
+                  spread=30, cotton=False, burst=False, max_age=1.8)
     return f
 
 
@@ -615,7 +611,7 @@ def s12(v, t, d):
                 mx, my = mark_xy(X, Y, BW)
                 link_mark(band, int(mx), int(my), mark_size(BW), heat=clamp((t - t_open + 0.4) / 0.4))
             band = steam(band, t, t_open, [(X, Y - BW * 0.15, BW * 0.5)], seed=60 + r * 2 + i, n=40, strength=0.9,
-                         rise=180, spread=30, cotton=(v == "mini"), burst=True, max_age=1.4)
+                         rise=180, spread=30, cotton=False, burst=True, max_age=1.4)
         # vertical seam melts after opening
         melt = ease_in_out((t - t_open - 0.1) / 0.6)
         seam_w = int(6 + 260 * melt)
