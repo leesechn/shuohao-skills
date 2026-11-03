@@ -12,7 +12,7 @@ from fx import (W, H, FPS, RICE, SEOUL, TUNG, NYC, DAY, INK, RED, YEL, IVORY, AM
                 c01, clamp, ease_out, ease_in_out, spring, pop, load_rgb, load_rgba, cover, place,
                 soft_shadow, text_rgba, put_text, text_width, halftone_text, fbm, finish, kv_background,
                 gold_trail, sparkle, steam, link_mark, bowl_closed_img, ui_card, BOWL_CLOSED, LID_FRONT, mark_xy, mark_size, open_center,
-                BOWL_OPEN)
+                BOWL_OPEN, pair_sleeve)
 from assets import resolve_logos
 
 BEAT = 60 / 90  # 0.6667 s
@@ -295,7 +295,7 @@ def s04(v, t, d):
                 tx, ty = cx + (BOWL_CLOSED["tab"][0] - BOWL_CLOSED["size"][0] / 2) * bw / BOWL_CLOSED["size"][0], \
                     cy + (BOWL_CLOSED["tab"][1] - BOWL_CLOSED["size"][1] / 2) * bw / BOWL_CLOSED["size"][0]
                 tk = text_rgba("톡", "title", 150, YEL if i == 0 else (255, 255, 255), 9, INK if i == 0 else RED)
-                place(half, tk, tx + 60, ty - 170, tk.shape[1] * (0.5 + 0.5 * k), rot=0.2)
+                place(half, tk, tx + 150, ty + 170, tk.shape[1] * (0.5 + 0.5 * k), rot=0.2)
             f[y0:y0 + HALF] = half
         f[HALF - 2:HALF + 2] = 1.0
         return finish(f, t, grain=0.02 if v == "real" else 0.012)
@@ -322,7 +322,7 @@ def s04(v, t, d):
 
 
 def city_labels(f, alpha=1.0):
-    for (txt, y, bg, fg) in [("서울 21:00", 310, SEOUL, (255, 255, 255)), ("뉴욕 08:00", HALF + 80, (250, 249, 245), INK)]:
+    for (txt, y, bg, fg) in [("서울 21:00", 310, SEOUL, (255, 255, 255)), ("뉴욕 07:00", HALF + 80, (250, 249, 245), INK)]:
         pill = ui_card(int(text_width(txt, "title", 52) + 64), 84, 42, bg, shadow=0.3)
         place(f, pill, 70 + pill.shape[1] / 2 - 30, y, pill.shape[1], alpha=alpha)
         put_text(f, txt, 70 + pill.shape[1] / 2 - 30, y, "title", 52, fg, alpha=alpha)
@@ -453,14 +453,15 @@ def peel_half(v, t, warm, seed):
     closed = load_rgba(BOWL_CLOSED["path"])
     opened = load_rgba(BOWL_OPEN["path"])
     tint = (1.05, 0.96, 0.85) if warm else (0.95, 0.99, 1.05)
-    soft_shadow(half, cx, cy + bw * 0.33, bw * 0.95, bw * 0.12, 0.5)
-    p = ease_in_out((t - 0.35) / 0.75)  # peel progress
+    soft_shadow(half, cx, cy + bw * 0.25, bw * 0.98, bw * 0.12, 0.6)
+    p = ease_in_out((t - 0.45) / 0.70)  # peel progress (after the tab lifts)
+    pre = ease_out((t - 0.12) / 0.30) * 95 if t < 0.55 else 95
     # open state underneath (scaled to the same container width)
     lay_o = half.copy()
     ox_, oy_ = open_center(cx, cy, bw)
     place(lay_o, opened, ox_, oy_, bw, tint=tint)
     lay_c = half.copy()
-    place(lay_c, closed, cx, cy, bw, tint=tint)
+    place(lay_c, bowl_closed_img(lift=pre), cx, cy, bw, tint=tint)
     k = bw / closed.shape[1]
     mx, my = mark_xy(cx, cy, bw)
     link_mark(lay_c, int(mx), int(my), mark_size(bw), heat=1.0)
@@ -470,20 +471,21 @@ def peel_half(v, t, warm, seed):
         yy, xx = np.mgrid[0:HALF, 0:W].astype(np.float32)
         # peel front moves diagonally from the front-left tab to the back-right
         dirx, diry = 0.78, -0.62
-        start = (cx - bw * 0.55) * dirx + (cy + bw * 0.35) * diry
-        end = (cx + bw * 0.6) * dirx + (cy - bw * 0.45) * diry
+        start = (cx - bw * 0.47) * dirx + (cy + bw * 0.10) * diry
+        end = (cx + bw * 0.50) * dirx + (cy - bw * 0.30) * diry
         front = start + (end - start) * p
         proj = xx * dirx + yy * diry
         m = np.clip((front - proj) / 6, 0, 1)  # 1 = peeled
         out = lay_c * (1 - m[..., None]) + lay_o * m[..., None]
         # curling roll at the front: radius shrinks as it travels
-        rad = 46 * (1 - 0.6 * p)
+        rad = 70 * (1 - 0.6 * p)
         band = np.clip(1 - np.abs(proj - front - rad * 0.4) / rad, 0, 1)
         inside = np.zeros((HALF, W), np.float32)
         place_mask = lay_c.copy()
         # restrict roll to the lid footprint
         fp = np.zeros((HALF, W), np.float32)
-        cv2.ellipse(fp, (int(cx), int(cy - bw * 0.02)), (int(bw * 0.5), int(bw * 0.38)), 0, 0, 360, 1, -1)
+        cv2.ellipse(fp, (int(cx), int(cy - bw * 0.079)), (int(bw * 0.495), int(bw * 0.19)), 0, 0, 360, 1, -1)
+        fp = cv2.GaussianBlur(fp, (0, 0), 3)
         band = band * fp * (1 if p < 0.98 else 0)
         shade = 0.88 + 0.12 * np.sin(np.clip((proj - front) / rad, -1, 1) * math.pi / 2)
         roll_col = np.ones(3, np.float32) * 0.97
@@ -774,9 +776,8 @@ def s15(v, t, d):
         link_mark(f, int(mx), int(my), mark_size(400),
                   heat=1.0, flash=0.4 + 0.3 * math.sin(t * 4 + i * 3))
     kb = spring(t - 0.45)
-    sleeve = ui_card(860, 74, 37, SEOUL, shadow=0.3)
-    place(f, sleeve, W / 2, 1150, sleeve.shape[1], alpha=clamp(kb * 2))
-    put_text(f, "같이밥 페어 · 둘이 같이 열어요", W / 2, 1150, "body", 40, (255, 255, 255), alpha=clamp(kb * 2))
+    if kb > 0.05:
+        pair_sleeve(f, W / 2, 1105 + (1 - kb) * 60, 860, 92, "같이밥", "둘이 같이 열어요", col=(0x8E, 0x1C, 0x17))
     k2 = pop(t - 0.5)
     t2 = halftone_text("햇반 같이밥", 104)
     place(f, t2, W / 2, 1360, t2.shape[1] * (0.8 + 0.2 * k2), alpha=min(1, k2 * 2))

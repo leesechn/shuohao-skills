@@ -498,3 +498,40 @@ def ui_card(w, h, r, color, shadow=0.25):
     rgba[..., 3] = np.maximum(m, sh)
     rgba[..., :3] = rgba[..., :3] * (m / np.maximum(rgba[..., 3], 1e-4))[..., None]
     return rgba
+
+
+def pair_sleeve(dst, cx, cy, width, height, title="같이밥", sub="혼자선 안 열려요", col=RED, sag=0.10):
+    """Paper sleeve that binds the pair (product packaging concept), curved like it wraps the bowls."""
+    w, h = int(width), int(height)
+    pad = 40
+    layer = np.zeros((h + 2 * pad + int(h * sag * 3), w + 2 * pad, 4), np.float32)
+    band = np.zeros((h, w, 4), np.float32)
+    yy = np.linspace(0, 1, h, dtype=np.float32)[:, None]
+    shade = 0.86 + 0.20 * np.clip(np.sin(yy * math.pi), 0, 1) ** 0.6
+    band[..., :3] = c01(col) * shade[..., None]
+    band[..., 3] = 1.0
+    band[:4, :, :3] = band[:4, :, :3] * 0.7 + 0.3
+    band[-4:, :, :3] *= 0.75
+    tt = text_rgba(title, "title", int(h * 0.62), (255, 255, 255))
+    st = text_rgba(sub, "body", int(h * 0.30), (255, 236, 232))
+    gap = int(h * 0.25)
+    total = tt.shape[1] + gap + st.shape[1]
+    x0 = (w - total) // 2
+    for img, x in ((tt, x0), (st, x0 + tt.shape[1] + gap)):
+        ih, iw = img.shape[:2]
+        y0 = (h - ih) // 2
+        if 0 <= y0 and x + iw <= w:
+            a = img[..., 3:4]
+            band[y0:y0 + ih, x:x + iw, :3] = band[y0:y0 + ih, x:x + iw, :3] * (1 - a) + img[..., :3] * a
+    # bend: each column drops by sag * parabola (wrapping the round bowls)
+    xs = np.arange(w, dtype=np.float32)
+    drop = (sag * h * 3) * (((xs - w / 2) / (w / 2)) ** 2)
+    for x in range(w):
+        d = int(drop[x])
+        layer[pad + d:pad + d + h, pad + x] = band[:, x]
+    sh = cv2.GaussianBlur(np.roll(layer[..., 3], 12, axis=0), (0, 0), 10) * 0.35
+    out = np.zeros_like(layer)
+    out[..., :3] = layer[..., :3]
+    out[..., 3] = np.maximum(layer[..., 3], sh)
+    out[..., :3] *= (layer[..., 3] / np.maximum(out[..., 3], 1e-4))[..., None]
+    return place(dst, out, cx, cy + h * sag * 1.5, out.shape[1])

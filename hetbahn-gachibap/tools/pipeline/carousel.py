@@ -12,7 +12,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 from fx import (RICE, SEOUL, TUNG, NYC, INK, RED, YEL, AMBER, c01, load_rgba, place, soft_shadow, text_rgba,
                 put_text, halftone_text, kv_background, gold_trail, sparkle, steam, link_mark, ui_card, fbm,
-                BOWL_CLOSED, LID_FRONT, BOWL_OPEN, mark_xy, mark_size, bowl_closed_img)
+                BOWL_CLOSED, LID_FRONT, BOWL_OPEN, mark_xy, mark_size, bowl_closed_img, pair_sleeve)
 from film import exploded, facet_bowl, get_bubble
 from assets import resolve_logos
 
@@ -65,6 +65,7 @@ def slide1():
     place(f, sl, CW / 2, 800, sl.shape[1], alpha=0.12)
     m1 = bowl_with_mark(f, CW / 2 - 225, 790, 450, lift=80)
     m2 = bowl_with_mark(f, CW / 2 + 225, 790, 450)
+    pair_sleeve(f, CW / 2, 830, 900, 90, "같이밥", "둘이 같이 열어요", col=(0x8E, 0x1C, 0x17))
     tk = text_rgba("톡", "title", 110, YEL, 8, INK)
     place(f, tk, CW / 2 - 400, 700, tk.shape[1], rot=0.2)
     put_text(f, "혼자 당기면 '톡' 하고 다시 붙어요", CW / 2, 1010, "body", 36, (255, 255, 255), stroke=3)
@@ -96,7 +97,7 @@ def slide2():
     put_text(f, "실제", 120, 1080, "title", 40, RED, anchor="lm")
     put_text(f, "4중 차단 필름 · 3중 차단 용기 · 20각 내압 구조", 230, 1080, "body", 34, INK, anchor="lm")
     put_text(f, "콘셉트", 120, 1160, "title", 40, (0xB0, 0x60, 0x10), anchor="lm")
-    put_text(f, "감온 잉크 마크 + 근거리 통신 칩", 270, 1160, "body", 34, INK, anchor="lm")
+    put_text(f, "감온 잉크 마크 + 동시 가열 신호 칩", 270, 1160, "body", 34, INK, anchor="lm")
     put_text(f, "짝이 같은 순간 데워졌을 때만 접착층이 풀림", 270, 1215, "body", 30, (90, 90, 90), anchor="lm")
     put_text(f, "필름 4층 구성은 CJ제일제당 공개 포장 기술 도해 기준", CW / 2, 1282, "body", 26, (255, 225, 220), stroke=2)
     tag(f, y=CH - 28)
@@ -132,7 +133,7 @@ def slide3():
     bowl_with_mark(f, 760, 330, 240, heat=0.4)
     bowl_with_mark(f, 930, 400, 200, heat=0.4)
     # tier 2: two cities, same moment
-    for k, (x, col, lab, tcol) in enumerate([(470, SEOUL, "서울 21:00", (255, 255, 255)), (820, NYC, "뉴욕 08:00", INK)]):
+    for k, (x, col, lab, tcol) in enumerate([(470, SEOUL, "서울 21:00", (255, 255, 255)), (820, NYC, "뉴욕 07:00", INK)]):
         card = ui_card(320, 230, 30, col, shadow=0.2)
         place(f, card, x, 720, card.shape[1])
         put_text(f, lab, x, 640, "body", 32, tcol)
@@ -186,6 +187,7 @@ def slide5():
     put_text(f, "혼자선 안 열리는 햇반, 누구랑 열래?", CW / 2, 880, "body", 38, (90, 90, 90))
     bowl_with_mark(f, CW / 2 - 120, 1080, 230)
     bowl_with_mark(f, CW / 2 + 120, 1080, 230)
+    pair_sleeve(f, CW / 2, 1100, 480, 56, "같이밥", "둘이 같이", col=RED)
     tag(f, color=(120, 120, 120), y=CH - 50)
     return f
 
