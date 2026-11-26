@@ -309,7 +309,11 @@ export function refine(res) {
     }
     const rest = artist ? q.toLowerCase().split(alias.toLowerCase()).join(' ').replace(/\s+/g, ' ').trim() : q;
     const extraT = [], extraR = [], alts = [];
-    if (artist) alts.push(`${artist.name} ${rest}`.trim());
+    if (artist) {
+      alts.push(`${artist.name} ${rest}`.trim());
+      // 영문 별칭(잔나비 → JANNABI)도 대조해 서비스마다 다른 표기를 같은 가수로 인식
+      for (const al of (artist.aliases || []).map((x) => x.name).filter((n) => /^[\x20-\x7E]+$/.test(n)).slice(0, 3)) alts.push(`${al} ${rest}`.trim());
+    }
     // 원어 곡명 → ISRC → Deezer 음원
     const rq = artist ? (rest ? `recording:(${luc(rest)}) AND arid:${artist.id}` : '') : `recording:(${luc(q)}) OR (recording:(${luc(q)}) AND artist:(${luc(q)}))`;
     if (rq) {
@@ -357,7 +361,7 @@ export function refine(res) {
         const best = Math.max(0, ...sims);
         list.forEach((t, i) => {
           const it = fromDeezerTrack(t);
-          it.boost = rest ? (sims[i] === best && best >= 0.5 ? 110 : 5) : 60 - i * 2;
+          it.boost = rest ? (sims[i] === best && best >= 0.5 ? 110 : -40) : 60 - i * 2;
           extraT.push(it);
         });
       }
@@ -371,7 +375,7 @@ export function refine(res) {
         if (ta !== an && ta !== al && (lite(t.title).includes(al) || lite(t.title).includes(an))) t.rel -= 120;
       }
       out.tracks.sort((a, b) => b.rel - a.rel);
-      out.top = pickTop(out.tracks, out.albums, out.artists);
+      out.top = rest && out.tracks[0] ? out.tracks[0] : pickTop(out.tracks, out.albums, out.artists); // 곡명까지 입력하면 곡을 최상위로
     }
     return out;
   });
