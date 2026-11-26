@@ -94,6 +94,9 @@ export function relevance(q, title, artist, idx, n) {
   // 원곡이 아닌 버전(커버·피아노·노래방 등)은 검색어에 그 단어가 없으면 감점
   const variant = /\b(piano|instrumental|inst\.?|karaoke|cover|lullaby|music box|8[- ]?bit|tribute|sped up|slowed|nightcore|mr)\b|커버|피아노|연주곡|오르골|노래방/i;
   if (variant.test(title || '') && !variant.test(q)) s -= 32;
+  // 재업로드 패턴: 제목 안에 '가수 - 곡'을 적은 다른 사람의 업로드(예: "뉴진스 (NewJeans) - Hype Boy" / jxng__ssxng)
+  if (artist && /\s[-–]\s/.test(title || '') && na && !nq.includes(na) && !na.includes(nq)) s -= 60;
+  if (/__|_{1}[a-z0-9]+_/i.test(artist || '')) s -= 25;
   return s;
 }
 const orderBonus = (idx, n) => (1 - idx / Math.max(n, 1)) * 30; // 각 서비스가 매긴 순서를 보조 신호로
