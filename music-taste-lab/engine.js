@@ -1062,7 +1062,10 @@ function stripWiki(t) {
 function parseRatings(wt) {
   const m = wt.match(/\{\{\s*(?:Music|Album) ratings([\s\S]*?)\n\}\}/i); if (!m) return [];
   const body = m[1]; const out = [];
-  const get = (k) => { const r = body.match(new RegExp(`\\|\\s*${k}\\s*=\\s*([^\\n|]*(?:\\{\\{[^}]*\\}\\}[^\\n|]*)?)`, 'i')); return r ? r[1] : ''; };
+  // 한 줄에 한 항목(| rev1 = [[Pitchfork (website)|Pitchfork]]) — 링크 안의 '|'에서 끊기지 않도록 줄 단위로 읽는다
+  const kv = {};
+  for (const line of body.split('\n')) { const r = line.match(/^\s*\|\s*([A-Za-z0-9]+)\s*=\s*(.*)$/); if (r) kv[r[1].toLowerCase()] = r[2]; }
+  const get = (k) => kv[k.toLowerCase()] || '';
   const norm = (raw) => {
     const r = raw.match(/\{\{\s*rating\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/i); if (r) return { text: `${r[1]}/${r[2]}`, n: (100 * +r[1]) / +r[2] };
     const f = raw.replace(/<ref[\s\S]*/i, '').match(/([\d.]+)\s*\/\s*(\d+)/); if (f) return { text: `${f[1]}/${f[2]}`, n: (100 * +f[1]) / +f[2] };
@@ -1081,7 +1084,12 @@ function receptionPara(wt) {
   return para ? para.slice(0, 700) + (para.length > 700 ? '…' : '') : '';
 }
 export function criticInfo(it) {
-  const title = (it.altTitle || it.title || '').replace(/\s*[([].*?[)\]]\s*/g, ' ').trim();
+  // 정식 앨범명의 꾸밈말 제거: "NewJeans 2nd EP 'Get Up'" → "Get Up", "Ditto - Single" → "Ditto"
+  let raw = (it.altTitle || it.title || '').replace(/\s+-\s+(Single|EP)$/i, '');
+  const quoted = raw.match(/['‘’"“”]([^'‘’"“”]{2,})['‘’"“”]/);
+  if (quoted && it.kind === 'album') raw = quoted[1];
+  raw = raw.replace(new RegExp(`^${primaryArtist(it.artist || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '').replace(/\b\d+(st|nd|rd|th)\s+(mini\s+)?(album|ep|single)\b/ig, '');
+  const title = raw.replace(/\s*[([].*?[)\]]\s*/g, ' ').trim() || (it.title || '');
   const artist = primaryArtist(it.artist || '');
   const kindWord = it.kind === 'album' ? 'album' : 'song';
   return cached(`cr:${it.kind}:${lite(title)}:${lite(artist)}`, 36e5, async () => {
