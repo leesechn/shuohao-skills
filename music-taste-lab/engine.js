@@ -87,9 +87,12 @@ export function relevance(q, title, artist, idx, n) {
   const toks = (q || '').toLowerCase().split(/\s+/).map(lite).filter((t) => t.length > 0);
   const hay = nt + ' ' + na;
   for (const t of toks) if (hay.includes(t)) s += 12;
-  s += (1 - idx / Math.max(n, 1)) * 30; // 각 서비스가 매긴 순서(인기·정확도)를 보조 신호로
+  // 원곡이 아닌 버전(커버·피아노·노래방 등)은 검색어에 그 단어가 없으면 감점
+  const variant = /\b(piano|instrumental|inst\.?|karaoke|cover|lullaby|music box|8[- ]?bit|tribute|sped up|slowed|nightcore|mr)\b|커버|피아노|연주곡|오르골|노래방/i;
+  if (variant.test(title || '') && !variant.test(q)) s -= 32;
   return s;
 }
+const orderBonus = (idx, n) => (1 - idx / Math.max(n, 1)) * 30; // 각 서비스가 매긴 순서를 보조 신호로
 
 /* ───────────── 검색 ───────────── */
 const art600 = (u) => (u || '').replace(/\/\d+x\d+bb\./, '/600x600bb.');
@@ -142,13 +145,16 @@ function merge(lists, q) {
       if (!raw || !raw.title) return;
       const it = { ...raw, srcs: [src] };
       it.key = itemKey(it);
-      const score = relevance(q, it.title, it.kind === 'artist' ? '' : it.artist, i, items.length);
+      const text = relevance(q, it.title, it.kind === 'artist' ? '' : it.artist, i, items.length);
+      it.text = Math.max(it.text || 0, text);
+      const score = text + orderBonus(i, items.length);
       const prev = map.get(it.key);
       if (!prev) { it.rel = score; map.set(it.key, it); return; }
       // 같은 곡이 두 서비스에 모두 있으면 하나로 합치고 정확도 가산
       for (const [k, v] of Object.entries(it)) if (v && !prev[k]) prev[k] = v;
       if (src === 'apple' && it.artwork) prev.artwork = it.artwork;
-      if (!prev.srcs.includes(src)) { prev.srcs.push(src); prev.rel = Math.max(prev.rel, score) + 18; }
+      prev.text = Math.max(prev.text || 0, text);
+      if (!prev.srcs.includes(src)) { prev.srcs.push(src); prev.rel = Math.max(prev.rel, score) + (prev.text >= 30 ? 18 : 0); }
       else prev.rel = Math.max(prev.rel, score);
     });
   }
@@ -204,10 +210,36 @@ export function search(q, tab = 'all') {
       { src: 'apple', items: val('aArtist').map(fromAppleArtist) },
       { src: 'deezer', items: val('dArtist').map(fromDeezerArtist) },
     ], q);
+    if (CJK.test(q) && tracks.length && !(tracks[0].text >= 100)) await aliasBoost(q, tracks).catch(() => {});
     const top = [tracks[0], artists[0], albums[0]].filter(Boolean).sort((a, b) => (b.rel + (b.kind === 'artist' ? 6 : 0)) - (a.rel + (a.kind === 'artist' ? 6 : 0)))[0] || null;
     if (!tracks.length && !albums.length && !artists.length && failed.length === keys.length) throw new Error('all-failed');
     return { tracks, albums, artists, top, failed: [...new Set(failed)] };
   });
+}
+
+// 한글·일본어·중국어 검색어는 서비스마다 영어/원어 표기가 달라 글자 매칭이 실패함
+// → MusicBrainz에서 원어 이름·공식 크레딧 이름을 찾고, ISRC로 Deezer 공식 제목까지 연결해 가산
+const CJK = /[\u3131-\uD79D\u3040-\u30FF\u4E00-\u9FFF]/;
+async function aliasBoost(q, tracks) {
+  const t = luc(q);
+  const d = await mb(`recording?query=${enc(`recording:(${t}) artist:(${t})`)}&limit=8`);
+  const recs = (d.recordings || []).filter((r) => (r.score ?? 0) >= 60).slice(0, 4);
+  if (!recs.length) return;
+  const names = new Set(); const titles = new Set(); let isrc = '';
+  for (const r of recs) {
+    for (const c of r['artist-credit'] || []) { if (c.name) names.add(lite(c.name)); if (c.artist?.name) names.add(lite(c.artist.name)); }
+    titles.add(dedupeKey(r.title));
+    if (!isrc && r.isrcs?.length) isrc = r.isrcs[0];
+  }
+  if (isrc) {
+    const dt = await deezer(`track/isrc:${enc(isrc)}`).catch(() => null);
+    if (dt?.title) { titles.add(dedupeKey(dt.title)); if (dt.artist?.name) names.add(lite(dt.artist.name)); }
+  }
+  for (const tr of tracks) {
+    const an = lite(primaryArtist(tr.artist));
+    if (names.has(an)) { tr.rel += 55; if (titles.has(dedupeKey(tr.title))) tr.rel += 60; }
+  }
+  tracks.sort((a, b) => b.rel - a.rel);
 }
 
 // 자동완성: 입력 중에는 Deezer만(호출 제한이 넉넉) 사용
@@ -508,6 +540,17 @@ export function computeFeatures(L, R, sr) {
   };
 }
 
+// 템포 두 배·절반 오류 보정: Deezer BPM이 있으면 그 옥타브로, 없으면 타격이 드문 빠른 값은 절반으로
+export function fixTempo(f, ref) {
+  if (!f) return f;
+  const c = [f.bpm, f.bpm / 2, f.bpm * 2];
+  let bpm = f.bpm;
+  if (ref > 0) bpm = c.reduce((a, b) => (Math.abs(Math.log2(b / ref)) < Math.abs(Math.log2(a / ref)) ? b : a));
+  else if (f.bpm > 135 && f.onsetRate < 3) bpm = f.bpm / 2;
+  if (bpm !== f.bpm) { f.bpmRaw = f.bpm; f.bpm = +bpm.toFixed(1); }
+  return f;
+}
+
 export async function analyzeAudio(url) {
   const r = await fetch(url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' });
   if (!r.ok) throw new Error('preview ' + r.status);
@@ -627,7 +670,7 @@ export async function analyzeTrack(tr, onStep = () => {}) {
   onStep('30초 미리듣기 신호 분석');
   const urls = [tr.preview, tr.previewAlt].filter(Boolean);
   for (const u of urls) {
-    try { out.features = await analyzeAudio(u); break; } catch (e) { /* 다음 소스 */ }
+    try { out.features = fixTempo(await analyzeAudio(u), dz?.bpm || 0); break; } catch (e) { /* 다음 소스 */ }
   }
   if (!out.features && tr.appleId && !tr.preview) { /* 안전장치 */ }
   if (!out.features) out.errors.push('미리듣기 오디오를 분석하지 못함(미리듣기 없음 또는 브라우저 차단)');
@@ -699,7 +742,7 @@ async function analyzeSet(tracks, genres, gclass, max, onStep) {
     const t = usable[i];
     onStep(`수록곡 신호 분석 ${i + 1}/${usable.length}`);
     try {
-      const f = await analyzeAudio(t.preview);
+      const f = fixTempo(await analyzeAudio(t.preview), 0);
       const m = moodOf(f, genres);
       const auto = autoAxes(f, gclass).axes;
       out.push({ title: t.title, artist: t.artist, preview: t.preview, artwork: t.artwork, deezerId: t.deezerId, appleId: t.appleId, durationMs: t.durationMs, features: f, mood: m, auto, score: musicScore(auto), vec: vec(f, m) });
