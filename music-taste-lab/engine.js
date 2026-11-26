@@ -64,6 +64,7 @@ export function mb(path) {
 }
 
 /* ───────────── 문자열 정규화·관련도 ───────────── */
+const CJK = /[\u3131-\uD79D\u3040-\u30FF\u4E00-\u9FFF]/;
 const lite = (s) => (s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 export const dedupeKey = (s) => lite(
   (s || '').normalize('NFKC')
@@ -158,7 +159,21 @@ function merge(lists, q) {
       else prev.rel = Math.max(prev.rel, score);
     });
   }
-  return [...map.values()].sort((a, b) => b.rel - a.rel);
+  // 같은 곡이 서비스마다 한글/영문 아티스트명으로 갈린 경우(검정치마 ↔ The Black Skirts): 제목·길이가 같으면 병합
+  const list = [...map.values()];
+  const out = [];
+  for (const it of list) {
+    const twin = it.kind === 'track' && out.find((o) => o.kind === 'track' && dedupeKey(o.title) === dedupeKey(it.title)
+      && o.durationMs && it.durationMs && Math.abs(o.durationMs - it.durationMs) <= 2500
+      && CJK.test(o.artist || '') !== CJK.test(it.artist || ''));
+    if (!twin) { out.push(it); continue; }
+    for (const [k, v] of Object.entries(it)) if (v && !twin[k]) twin[k] = v;
+    if (it.srcs.includes('apple') && it.artwork) twin.artwork = it.artwork;
+    if (CJK.test(it.artist || '') && !CJK.test(twin.artist || '')) twin.artist = it.artist;
+    twin.srcs = [...new Set([...twin.srcs, ...it.srcs])];
+    twin.rel = Math.max(twin.rel, it.rel) + 18;
+  }
+  return out.sort((a, b) => b.rel - a.rel);
 }
 
 const enc = encodeURIComponent;
@@ -219,7 +234,6 @@ export function search(q, tab = 'all') {
 
 // 한글·일본어·중국어 검색어는 서비스마다 영어/원어 표기가 달라 글자 매칭이 실패함
 // → MusicBrainz에서 원어 이름·공식 크레딧 이름을 찾고, ISRC로 Deezer 공식 제목까지 연결해 가산
-const CJK = /[\u3131-\uD79D\u3040-\u30FF\u4E00-\u9FFF]/;
 async function aliasBoost(q, tracks) {
   const t = luc(q);
   const d = await mb(`recording?query=${enc(`recording:(${t}) artist:(${t})`)}&limit=8`);
