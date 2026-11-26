@@ -407,7 +407,7 @@ function moodBlock(an) {
   const f = an.features, m = an.mood;
   if (!f) return `<div class="block"><h3>곡의 느낌</h3><p class="mut" style="margin:0">미리듣기 오디오를 분석하지 못해 느낌을 측정하지 못했습니다. ${an.bpmRef ? `Deezer 기준 템포는 ${an.bpmRef} BPM입니다.` : ''}</p></div>`;
   const drNote = f.dr > 12 ? '강약 대비가 큼' : f.dr < 6 ? '세기 변화가 적고 꽉 찬 편' : '보통 범위';
-  const bpmNote = an.bpmRef && Math.abs(an.bpmRef - f.bpm) > 4 ? `Deezer 표기 ${an.bpmRef} BPM. 박자 단위 차이로 반·두 배가 될 수 있음` : '30초 구간의 타격음 주기로 추정';
+  const bpmNote = f.pulse < 0.12 ? '박이 뚜렷하지 않은 곡이라 템포 추정이 불확실함' : an.bpmRef && Math.abs(an.bpmRef - f.bpm) > 4 ? `Deezer 표기 ${an.bpmRef} BPM. 박자 단위 차이로 반·두 배가 될 수 있음` : '30초 구간의 타격음 주기로 추정';
   return `<div class="block"><h3>곡의 느낌</h3>
     <div class="mood-words">${esc(m.words.join(' · '))}</div>
     <div class="mood-tex">${m.texture.map((t) => `<span>${esc(t)}</span>`).join('')}</div>

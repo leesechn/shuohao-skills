@@ -586,8 +586,10 @@ export function moodOf(f, genres) {
   // 실측 보정: 발라드 박동 0.12~0.16, 댄스 0.67~0.91 / 고역 비중 발라드 ~0.01, 댄스 0.04~0.09
   const pulseN = clamp((f.pulse - 0.1) / 0.6), perc = clamp((f.high - 0.008) / 0.06), flatN = clamp((f.flatness - 0.18) / 0.3);
   const tempo = clamp((f.bpm - 65) / 105);
-  const energy = clamp(0.55 * pulseN + 0.25 * perc + 0.2 * flatN);
-  const arousal = clamp(0.45 * pulseN + 0.2 * perc + 0.15 * flatN + 0.2 * tempo);
+  // 두 경로 중 강한 쪽 위주: 박동(댄스·팝) / 잡음·고역 타악기(메탈·록은 박이 기타에 묻혀 박동 값이 낮음)
+  const aBeat = 0.6 * pulseN + 0.4 * tempo, aNoise = 0.55 * perc + 0.45 * flatN;
+  const arousal = clamp(0.65 * Math.max(aBeat, aNoise) + 0.35 * Math.min(aBeat, aNoise));
+  const energy = arousal;
   const major = 1 / (1 + Math.exp(-f.modeMargin * 9));
   const bright = clamp((f.centroid - 900) / 2600);
   const valence = clamp(0.4 * major + 0.4 * bright + 0.2 * tempo);
