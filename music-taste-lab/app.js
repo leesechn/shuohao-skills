@@ -73,16 +73,32 @@ function scoreOf(kind, an, key) {
   if (!an || an.failed) return null;
   const man = S.manual[key] || {};
   if (kind === 'track') {
+    const ev = evidenceOf(key);
+    const base = E.applyEvidence(an.auto || {}, an.autoSrc || {}, ev);
     const axes = {}, src = {};
     for (const a of E.AXES) {
       if (man.axes?.[a.k] != null) { axes[a.k] = man.axes[a.k]; src[a.k] = 'u'; }
-      else if (an.auto?.[a.k] != null) { axes[a.k] = an.auto[a.k]; src[a.k] = 'm'; }
+      else if (base.axes[a.k] != null) { axes[a.k] = base.axes[a.k]; src[a.k] = base.src[a.k] || 'm'; }
       else { axes[a.k] = E.DEFAULT_UNMEASURED; src[a.k] = 'g'; }
     }
-    return { score: E.musicScore(axes, !!man.inst), axes, src, provisional: Object.values(src).includes('g') };
+    const inst = man.inst ?? !!an.lyrics?.instrumental;
+    return { score: E.musicScore(axes, inst), axes, src, ev, inst, provisional: Object.values(src).includes('g') };
   }
-  const r = E.setScore(kind, an, man.axes || {});
+  const r = E.setScore(kind, withAlbumEvidence(kind, an, key), man.axes || {});
   return r ? { ...r, provisional: kind === 'album' && man.axes?.미 == null } : null;
+}
+// 외부 근거: 곡 자체 위키 문서 + 수록 앨범 문서
+function evidenceOf(key) {
+  const sc = S.critic.get(key), ac = S.critic.get(key + '#al');
+  if ((!sc || sc.loading) && (!ac || ac.loading)) return null;
+  return E.evidenceScore(sc && !sc.loading ? sc : null, ac && !ac.loading ? ac : null);
+}
+// 앨범 점수: 앨범 평점이 있으면 수록곡마다 같은 근거를 적용
+function withAlbumEvidence(kind, an, key) {
+  if (kind !== 'album') return an;
+  const cr = S.critic.get(key); const ev = cr && !cr.loading ? E.evidenceScore(cr, null) : null;
+  if (!ev) return an;
+  return { ...an, analyzed: (an.analyzed || []).map((t) => (t.failed ? t : { ...t, score: E.musicScore(E.applyEvidence(t.auto || {}, t.autoSrc || {}, ev).axes, t.inst) })) };
 }
 const CORE = new Set(['작곡', '작사', '작사·작곡', '편곡', '프로듀서']);
 function featsOf(e) {
@@ -182,6 +198,7 @@ function syncAdd() {
     else b.textContent = on ? '✓ 담김' : '+ 담기';
   });
 }
+function ensureCritic(e) { if (e.kind !== 'artist' && !S.critic.has(e.key)) { reg(e.item); loadCritic(S.items.get(e.key)); } }
 function renderBasket() {
   const list = $('#basketList');
   $('#basketCount').textContent = `${S.lib.entries.length}개`;
@@ -194,7 +211,7 @@ function renderBasket() {
     return;
   }
   list.innerHTML = rows.map((e) => {
-    reg(e.item);
+    reg(e.item); if (e.an) ensureCritic(e);
     const sc = scoreOf(e.kind, e.an, e.key);
     const g = e.an?.genres?.[0];
     const status = S.pending.has(e.key) || !e.an ? '<span class="bi-score">분석 중…</span>' : sc ? `<span class="bi-score"><b>${sc.score.toFixed(1)}</b>${E.grade(sc.score).g} · ${sc.provisional ? '잠정' : '확정'}</span>` : '<span class="bi-score">점수 없음</span>';
@@ -330,9 +347,14 @@ function openModal(key) {
 }
 function loadCritic(it) {
   const key = it.key; S.critic.set(key, { loading: true });
-  E.criticInfo(it).then((v) => S.critic.set(key, v), () => S.critic.set(key, { found: false, error: true }))
-    .finally(() => { if (curKey() === key) renderModal(); });
+  const done = () => { if (curKey() === key) renderModal(); renderBasket(); };
+  E.criticInfo(it).then((v) => S.critic.set(key, v), () => S.critic.set(key, { found: false, error: true })).finally(done);
+  if (it.kind === 'track' && it.album && dedupeAlb(it.album) !== dedupeAlb(it.title)) {
+    S.critic.set(key + '#al', { loading: true });
+    E.criticInfo({ kind: 'album', title: it.album, artist: it.artist }).then((v) => S.critic.set(key + '#al', v), () => S.critic.set(key + '#al', { found: false })).finally(done);
+  }
 }
+const dedupeAlb = (t) => E.dedupeKey(String(t || '').replace(/\s+-\s+(Single|EP)$/i, ''));
 function reviewBlock(it, an) {
   const cr = S.critic.get(it.key);
   const paras = E.reviewText(it, an, cr && !cr.loading && !cr.error ? cr : null);
@@ -385,20 +407,21 @@ function progressBlock(key) {
 function scoreBlock(key, an) {
   const sc = scoreOf('track', an, key); const man = S.manual[key] || {};
   const g = E.grade(sc.score);
-  const label = sc.provisional ? '잠정 점수입니다. 오디오로 잴 수 있는 작곡(화성)·편곡만 측정했고, 나머지는 보수적 기본값 2.5점입니다. 직접 들어 보고 막대를 옮기면 확정됩니다.' : '모든 항목을 직접 채점한 확정 점수입니다.';
-  const SRC = { m: ['m', '측정'], g: ['g', '기본값'], u: ['u', '직접'] };
+  const evTxt = sc.ev ? `외부 근거 ${sc.ev.score}/100 (${sc.ev.why.join(' · ')})를 반영해 측정값과 평균했습니다.` : (S.critic.get(key)?.loading ? '평단 근거를 확인하는 중입니다.' : '평단 근거가 없어 측정값만 썼고, 근거 없이는 어떤 항목도 3.5점을 넘지 않습니다.');
+  const label = `코드 진행·사운드·구조·가사·커버를 측정하고, 위키백과 평점 표와 평단 결산 리스트를 근거로 올리거나 내립니다(인기·차트·수상은 제외). ${evTxt}`;
+  const SRC = { m: ['m', '측정'], mc: ['m', '측정+평단'], c: ['c', '평단 근거'], g: ['g', '기본값'], u: ['u', '직접'], inst: ['g', '연주곡'] };
   return `<div class="d-block"><h4>엄격 8축 채점</h4>
     <div class="score-box"><div><div class="score-big">${sc.score.toFixed(1)}<small> / 100</small></div></div><div><span class="badge ${sc.score >= 80 ? 'badge-ok' : sc.score < 60 ? 'badge-danger' : ''}">${g.g} · ${g.t}</span><p class="muted small" style="margin-top:6px">${label}</p></div></div>
     <div class="axes">${E.AXES.map((a) => {
-      const v = sc.axes[a.k]; const [c, t] = SRC[sc.src[a.k]]; const off = man.inst && a.k === '가';
+      const v = sc.axes[a.k]; const [c, t] = SRC[sc.src[a.k]] || SRC.g; const off = sc.inst && a.k === '가';
       return `<div class="axis"${off ? ' style="opacity:.35"' : ''}><span class="nm">${esc(a.name)}<small>가중치 ${a.w}</small></span>
         <input type="range" min="0" max="5" step="0.5" value="${v}" data-act="axis" data-key="${esc(key)}" data-axis="${a.k}" aria-label="${esc(a.name)} 점수"${off ? ' disabled' : ''}>
         <span class="v">${(+v).toFixed(1)}</span><span class="src ${c}">${t}</span><span class="hint">${esc(a.hint)} — ${esc(E.ANCHORS[Math.round(v)])}</span></div>`;
     }).join('')}</div>
-    <div class="row-gap"><label class="check"><input type="checkbox" data-act="inst" data-key="${esc(key)}"${man.inst ? ' checked' : ''}> 연주곡(가사 항목 제외)</label>
+    <div class="row-gap"><label class="check"><input type="checkbox" data-act="inst" data-key="${esc(key)}"${sc.inst ? ' checked' : ''}> 연주곡(가사 항목 제외)</label>
       ${man.axes && Object.keys(man.axes).length ? `<button type="button" class="btn-ghost" data-act="resetAxes" data-key="${esc(key)}">직접 채점 지우기</button>` : ''}
       <button type="button" class="btn-ghost" data-act="toRubric" data-key="${esc(key)}">8축 채점기로 보내기</button></div>
-    <p class="muted small">기준: 5 장르의 교본 · 4 장르 상위 10% · 3 탄탄함 · 2 평범 · 1 약점이 눈에 띔 · 0 곡을 해침. 자동 측정은 근거 없이 4점을 넘지 않고(작곡은 멜로디를 들을 수 없어 3.5점까지), 인기·차트·수상은 점수에 넣지 않습니다.</p>
+    <p class="muted small">기준: 5 장르의 교본 · 4 장르 상위 10% · 3 탄탄함 · 2 평범 · 1 약점이 눈에 띔 · 0 곡을 해침. 30초 미리듣기 측정은 결함 판별 위주라 폭을 좁게 두고, 높은 점수는 외부 평단 근거가 있을 때만 가능합니다. 연주·보컬은 기계로 판정할 수 없어 근거가 없으면 기본값입니다.</p>
     ${fitBlock(key, an, sc.score)}</div>`;
 }
 function fitBlock(key, an, score) {
@@ -442,6 +465,8 @@ function moodBlock(an, it) {
       ${kv('화성 움직임', Math.round(C(f.harmonicChange / 0.2) * 100), '1초 단위 음높이 분포 변화', f.harmonicChange / 0.2)}
       ${kv('어쿠스틱 질감', Math.round(m.acoustic * 100), '잡음성·고역·비트 규칙성', m.acoustic)}
     </div>
+    ${an.lyrics?.lines ? `<p class="muted small">가사 구조(lrclib.net): ${an.lyrics.lines}줄 · 고유 줄 비율 ${Math.round(an.lyrics.uniq * 100)}% · 어휘 다양성 ${Math.round(an.lyrics.mattr * 100)} · 가장 많이 반복된 줄 비중 ${Math.round(an.lyrics.top * 100)}%</p>` : an.lyrics?.instrumental ? '<p class="muted small">가사 DB 기준 연주곡입니다.</p>' : '<p class="muted small">가사를 찾지 못해 가사 항목은 기본값입니다.</p>'}
+    ${f.chords ? `<p class="muted small">30초 구간 코드: 서로 다른 화음 ${f.chords.distinct}개 · 조성 밖 화음 ${Math.round(f.chords.nondia * 100)}% · 4초당 코드 변화 ${f.chords.changeRate}회</p>` : ''}
     <div class="svg-box" id="mQuad"></div>
     <p class="muted small">취향 지도 위치: <b>${esc(m.quad)}</b> (가로: 밴드·어쿠스틱 ↔ 전자·R&amp;B / 세로: 아련 ↔ 밝음)</p></div>`;
 }
@@ -470,7 +495,7 @@ function setDetail(it) {
   if (it.kind === 'artist') {
     const fl = S.albumFilter || 'all';
     const albums = (d.albums || []).filter((a) => fl === 'all' || (fl === 'single' ? a.recordType === 'single' : a.recordType !== 'single'));
-    h += `<div class="d-block"><div class="section-label" style="margin:0"><span>인기곡 TOP ${d.tracks.length}</span>${d.tracks.length ? '<button type="button" class="btn-secondary" data-act="addTop5">+ 상위 5곡 담기</button>' : ''}</div>
+    h += `<div class="d-block"><div class="section-label" style="margin:0"><span>인기곡 TOP ${d.tracks.length} <span class="muted small" style="font-weight:500">Deezer 인기도 순 · 리믹스·라이브·변형 버전 제외${d.tracks.some((t) => t.unranked) ? ' · 순위 없는 곡은 Apple 목록으로 보충' : ''}</span></span>${d.tracks.length ? '<button type="button" class="btn-secondary" data-act="addTop5">+ 상위 5곡 담기</button>' : ''}</div>
       <div class="track-list">${d.tracks.map((t, i) => trackRow(t, i + 1)).join('') || `<p class="muted small">인기곡을 불러오지 못했습니다. <button type="button" class="btn-ghost" data-act="reloadDetail" data-key="${esc(key)}">다시 불러오기</button></p>`}</div></div>
       <div class="d-block"><div class="section-label" style="margin:0"><span>발매작 (${albums.length} · 최신순)</span>
         <span class="pill-group">${[['all', `전체 (${(d.albums || []).length})`], ['album', '정규·EP'], ['single', '싱글']].map(([k, l]) => `<button type="button" class="pill${fl === k ? ' active' : ''}" data-act="albumFilter" data-f="${k}">${l}</button>`).join('')}</span></div>
@@ -497,6 +522,7 @@ function setAnalysis(it, an) {
         return `<div class="axis"><span class="nm">${n}</span><input type="range" min="0" max="5" step="0.5" value="${v}" data-act="axis" data-key="${esc(key)}" data-axis="${k}" aria-label="${n} 점수"><span class="v">${(+v).toFixed(1)}</span><span class="src ${s[0]}">${s[1]}</span><span class="hint">${esc(hint)} — ${esc(E.ANCHORS[Math.round(v)])}</span></div>`; }).join('')}</div>`;
     h += fitBlock(key, an, sc.score);
   }
+  h += picksBlock(it, an);
   h += genreBlock(an);
   if (it.kind === 'album') h += creditBlock(an, true);
   if (an.mood && ok.length) {
@@ -508,6 +534,23 @@ function setAnalysis(it, an) {
       <div class="svg-box" id="mQuad"></div></div>`;
   }
   return h;
+}
+// 추천: 음악성(근거 반영 측정 점수 상위)과 상징성(Deezer 인기도 1위·앨범 타이틀곡)을 분리해 보여 준다
+function picksBlock(it, an) {
+  const A = withAlbumEvidence(it.kind, an, it.key);
+  const ok = (A.analyzed || []).filter((t) => !t.failed);
+  if (!ok.length) return '';
+  const best = [...ok].sort((a, b) => b.score - a.score).slice(0, 3);
+  const d = detailCache.get(it.key);
+  const pool = it.kind === 'artist' ? (d?.tracks || []) : (an.tracks || []);
+  let icon = null;
+  if (it.kind === 'album') { const nm = dedupeAlb(it.title); icon = pool.find((t) => nm.includes(E.dedupeKey(t.title)) && E.dedupeKey(t.title).length > 1) || null; }
+  if (!icon) icon = [...pool].filter((t) => (t.rank || 0) > 0).sort((a, b) => (b.rank || 0) - (a.rank || 0))[0] || null;
+  const row = (t, why) => { const tk = reg({ kind: 'track', ...t, srcs: t.srcs || ['deezer'] }); return `<div class="track-row"><img src="${esc(art(t))}" alt="" class="track-thumb" loading="lazy"><div class="track-meta" data-act="open" data-key="${esc(tk)}"><div class="track-title">${esc(t.title)}</div><div class="track-sub">${esc(why)}</div></div><div class="track-actions">${t.preview ? `<button type="button" class="icon-btn" data-act="play" data-key="${esc(tk)}" title="미리듣기">▶</button>` : ''}<button type="button" class="icon-btn${entry(tk) ? ' added' : ''}" data-act="add" data-key="${esc(tk)}" title="담기">${entry(tk) ? '✓' : '+'}</button></div></div>`; };
+  return `<div class="d-block"><h4>추천곡</h4>
+    <div class="section-label" style="margin:0">음악성이 가장 높은 곡 <span class="muted small" style="font-weight:500">근거 반영 측정 점수 · 분석한 ${ok.length}곡 중</span></div>
+    <div class="track-list">${best.map((t, i) => row(t, `${i + 1}위 · ${t.score.toFixed(1)}점 · ${t.mood?.words?.[0] || ''} · ${Math.round(t.features.bpm)} BPM`)).join('')}</div>
+    ${icon ? `<div class="section-label" style="margin:10px 0 0">대표곡(상징성) <span class="muted small" style="font-weight:500">${it.kind === 'album' && dedupeAlb(it.title).includes(E.dedupeKey(icon.title)) ? '앨범 타이틀곡' : 'Deezer 인기도 1위'} · 점수와 무관</span></div><div class="track-list">${row(icon, it.kind === 'album' && dedupeAlb(it.title).includes(E.dedupeKey(icon.title)) ? '앨범 이름과 같은 타이틀곡' : '가장 많이 들린 곡')}</div>` : ''}</div>`;
 }
 function drawModalQuad(key) {
   const box = $('#mQuad'); if (!box) return;
@@ -723,7 +766,11 @@ async function measureRubric() {
     b.textContent = '음향 측정 중…';
     const an = getAn(it.key) || await analyze(it);
     S.rubric.an = an;
-    if (an?.auto) for (const k of Object.keys(an.auto)) { S.rubric.axes[k] = Math.round(an.auto[k] * 2) / 2; S.rubric.src[k] = 'm'; }
+    b.textContent = '평단 근거 확인 중…';
+    if (!S.critic.has(it.key)) loadCritic(it);
+    await Promise.all([E.criticInfo(it).catch(() => null), it.album ? E.criticInfo({ kind: 'album', title: it.album, artist: it.artist }).catch(() => null) : null]);
+    await new Promise((r) => setTimeout(r, 50));
+    if (an?.auto) { const sc = scoreOf('track', an, it.key); S.rubric.axes = { ...RD }; S.rubric.src = {}; for (const a of E.AXES) if (sc.src[a.k] !== 'g' && sc.src[a.k] !== 'u') { S.rubric.axes[a.k] = Math.round(sc.axes[a.k] * 2) / 2; S.rubric.src[a.k] = 'm'; } $('#rEvidence').value = sc.ev ? 'A' : 'C'; $('#rInst').checked = !!sc.inst; }
     if (an?.genres?.length && !$('#rGenre').value) $('#rGenre').value = `${an.genres.slice(0, 2).map((g) => g.ko || g.name).join(' · ')}${it.year ? ' · ' + it.year : ''}`;
     $('#measureNote').textContent = an?.features ? `찾은 곡: ${it.artist} – ${it.title} · 작곡(화성)·편곡 항목을 측정값으로 채웠습니다. 나머지는 직접 골라 주세요.` : `찾은 곡: ${it.artist} – ${it.title} · 미리듣기를 분석하지 못해 측정값이 없습니다.`;
     renderRubricAxes(); calcRubric();
@@ -751,14 +798,60 @@ async function runPreset(p) {
   const { ok, miss } = await addLines(PRESETS[p] || [], (i, n) => { $('#queueText').textContent = `샘플 찾는 중 ${i}/${n}`; });
   toast(`샘플 ${ok}곡을 담았습니다${miss.length ? ` · 못 찾음: ${miss.join(', ')}` : ''}`);
 }
+/* 플레이리스트 가져오기 */
+S.imp = [];
+function renderImport() {
+  const box = $('#importResults'); if (!box) return;
+  if (!S.imp.length) { box.innerHTML = ''; return; }
+  const found = S.imp.filter((r) => r.it);
+  box.innerHTML = `<div class="section-label"><span>인식 결과 ${found.length}곡${S.imp.length - found.length ? ` · 못 찾음 ${S.imp.length - found.length}` : ''}</span>${found.length ? `<button type="button" class="btn-primary small" data-act="impAdd">선택한 ${S.imp.filter((r) => r.it && r.on).length}곡 담기</button>` : ''}</div>
+    <div class="track-list">${S.imp.map((r, i) => r.it ? `<label class="track-row" style="cursor:pointer"><input type="checkbox" data-act="impToggle" data-i="${i}"${r.on ? ' checked' : ''} style="accent-color:var(--accent)"><img src="${esc(art(r.it))}" alt="" class="track-thumb"><div class="track-meta"><div class="track-title">${esc(r.it.title)}${r.it.uncertain ? ' <span class="badge badge-warn">확인 필요</span>' : ''}${entry(r.it.key) ? ' <span class="badge badge-ok">이미 담김</span>' : ''}</div><div class="track-sub">${esc(r.it.artist)} · 입력: ${esc(r.src)}</div></div></label>`
+      : `<div class="track-row"><span class="badge badge-danger">못 찾음</span><div class="track-meta"><div class="track-sub">${esc(r.src)}</div></div></div>`).join('')}</div>`;
+}
 async function runBulk() {
-  const lines = $('#bulkText').value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) { toast('곡 목록을 입력해 주세요.'); return; }
-  const b = $('#bulkRun'); b.disabled = true;
-  const { ok, miss } = await addLines(lines, (i, n, l) => { $('#bulkMsg').textContent = `찾는 중 ${i}/${n}: ${l}`; });
-  b.disabled = false; $('#bulkMsg').textContent = '줄마다 가장 정확한 곡을 찾아 담습니다.';
-  if (!miss.length) { $('#bulkText').value = ''; $('#bulk').hidden = true; } else $('#bulkText').value = miss.join('\n');
-  toast(`${ok}곡을 담았습니다${miss.length ? ` · 못 찾은 ${miss.length}줄은 입력창에 남겨 두었습니다` : ''}`);
+  const entries = E.parseImport($('#bulkText').value);
+  if (!entries.length) { toast('목록을 붙여넣거나 캡처를 올려 주세요.'); return; }
+  const b = $('#bulkRun'); b.disabled = true; S.imp = []; renderImport();
+  let n = 0;
+  for (const e of entries) {
+    $('#bulkMsg').textContent = `찾는 중… ${++n}/${entries.length}`;
+    if (e.type === 'unsupported') { S.imp.push({ it: null, src: `${e.src} (지원하지 않는 링크)` }); renderImport(); continue; }
+    await E.resolveImport(e, (it, src) => { if (it) reg(it); S.imp.push({ it, src, on: !!it && !entry(it?.key) }); renderImport(); });
+  }
+  b.disabled = false; $('#bulkMsg').textContent = `완료: ${S.imp.filter((r) => r.it).length}곡을 찾았습니다. 확인 후 담아 주세요.`;
+}
+// 인식 전처리: 2배 확대 · 흑백 · 어두운 배경(다크 모드 캡처)은 반전해 밝은 바탕의 검은 글씨로
+async function prepOCR(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(2, 2400 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    const cx = cv.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+    const im = cx.getImageData(0, 0, cv.width, cv.height), d = im.data; let sum = 0;
+    for (let i = 0; i < d.length; i += 4) { const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = d[i + 1] = d[i + 2] = y; sum += y; }
+    const dark = sum / (d.length / 4) < 128;
+    if (dark) for (let i = 0; i < d.length; i += 4) { d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; }
+    cx.putImageData(im, 0, 0);
+    return cv;
+  } catch { return file; }
+}
+async function runOCR(files) {
+  if (!files?.length) return;
+  const msg = $('#ocrMsg');
+  try {
+    if (!window.Tesseract) {
+      msg.textContent = '글자 인식 도구를 불러오는 중… (처음 한 번, 수 MB)';
+      await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'; sc.onload = ok; sc.onerror = no; document.head.appendChild(sc); });
+    }
+    const lines = [];
+    for (let i = 0; i < files.length; i++) {
+      const img = await prepOCR(files[i]);
+      const r = await window.Tesseract.recognize(img, 'kor+eng', { logger: (m) => { if (m.status === 'recognizing text') msg.textContent = `이미지 ${i + 1}/${files.length} 글자 인식 중 ${Math.round((m.progress || 0) * 100)}%`; } });
+      lines.push(...(r.data.text || '').split('\n'));
+    }
+    const ta = $('#bulkText'); ta.value = (ta.value ? ta.value + '\n' : '') + lines.map((l) => l.trim()).filter(Boolean).join('\n');
+    msg.textContent = `인식 완료: ${lines.filter((l) => l.trim()).length}줄. 잘못 읽힌 줄은 고친 뒤 ‘곡 찾기’를 누르세요.`;
+  } catch { msg.textContent = '글자 인식에 실패했습니다. 인터넷 연결을 확인하거나 목록을 직접 붙여넣어 주세요.'; }
 }
 function exportLib() {
   const blob = new Blob([JSON.stringify({ app: 'cheongeumsil', v: 2, lib: S.lib, manual: S.manual, anti: S.anti }, null, 1)], { type: 'application/json' });
@@ -808,6 +901,7 @@ document.addEventListener('click', (e) => {
     case 'bulkOpen': $('#bulk').hidden = false; $('#bulkText').focus(); break;
     case 'bulkClose': $('#bulk').hidden = true; break;
     case 'bulkRun': runBulk(); break;
+    case 'impAdd': { let n = 0; for (const r of S.imp) if (r.it && r.on && addItem(r.it, true)) n++; afterLibChange(); renderImport(); toast(`${n}곡을 담았습니다.`); break; }
     case 'mClose': closeModal(); break;
     case 'mBack': S.stack.pop(); renderModal(); break;
     case 'mAdd': toggleItem(key); break;
@@ -838,10 +932,16 @@ document.addEventListener('change', (e) => {
   else if (el.dataset.act === 'raxis') { S.rubric.axes[el.dataset.axis] = +el.value; delete S.rubric.src[el.dataset.axis]; renderRubricAxes(); calcRubric(); }
   else if (el.id === 'rEvidence' || el.id === 'rInst') calcRubric();
   else if (el.dataset.act === 'import' && el.files?.[0]) importLib(el.files[0]);
+  else if (el.dataset.act === 'impToggle') { S.imp[+el.dataset.i].on = el.checked; renderImport(); }
+  else if (el.dataset.act === 'ocrFile' && el.files?.length) runOCR([...el.files]);
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (!modal.hidden) closeModal(); else if (!$('#bulk').hidden) $('#bulk').hidden = true; } });
 modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 $('#bulk').addEventListener('click', (e) => { if (e.target.id === 'bulk') $('#bulk').hidden = true; });
+{ const dz = $('#drop'); ['dragover', 'dragenter'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, () => dz.classList.remove('over')));
+  dz.addEventListener('drop', (e) => { e.preventDefault(); const fs = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/')); if (fs.length) runOCR(fs); });
+  document.addEventListener('paste', (e) => { if ($('#bulk').hidden) return; const fs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/')); if (fs.length) { e.preventDefault(); runOCR(fs); } }); }
 document.addEventListener('error', (e) => { const t = e.target; if (t?.tagName === 'IMG' && !t.dataset.ph) { t.dataset.ph = '1'; t.src = PH(t.alt || '?'); } }, true);
 
 /* 테마 */

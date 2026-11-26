@@ -70,7 +70,7 @@
             <p class="card-desc">개수 제한 없음 · 많이 담을수록 취향 공식이 정교해집니다</p>
           </div>
           <div class="row-gap">
-            <button type="button" class="btn-secondary" data-act="bulkOpen">+ 여러 곡 붙여넣기</button>
+            <button type="button" class="btn-secondary" data-act="bulkOpen">+ 플레이리스트 가져오기</button>
           </div>
         </div>
         <div class="basket-toolbar">
@@ -159,16 +159,28 @@
   </div>
 </div>
 
-<!-- 붙여넣기 -->
+<!-- 플레이리스트 가져오기 -->
 <div id="bulk" class="modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="bulkTitle">
-  <div class="modal-panel narrow">
+  <div class="modal-panel">
     <div class="modal-head">
-      <div><h3 id="bulkTitle">여러 곡 한꺼번에 붙여넣기</h3><p class="muted small">한 줄에 한 곡씩 (예: 아이유 - 밤편지)</p></div>
+      <div><h3 id="bulkTitle">플레이리스트 가져오기</h3><p class="muted small">복사한 목록·곡 링크를 붙여넣거나, 플레이리스트 화면 캡처를 올리세요</p></div>
       <button type="button" class="btn-secondary" data-act="bulkClose">닫기 ✕</button>
     </div>
     <div class="modal-body">
-      <textarea id="bulkText" rows="9" class="field-textarea" placeholder="NewJeans - Ditto&#10;검정치마 - EVERYTHING&#10;藤井風 - 死ぬのがいいわ&#10;SZA - Snooze&#10;아이유 - 밤편지"></textarea>
-      <div class="bulk-foot"><span class="muted small" id="bulkMsg">줄마다 가장 정확한 곡을 찾아 담습니다.</span><button type="button" class="btn-primary" data-act="bulkRun" id="bulkRun">일괄 추가</button></div>
+      <div class="import-grid">
+        <div>
+          <label class="field-label" for="bulkText">텍스트·링크 붙여넣기</label>
+          <textarea id="bulkText" rows="8" class="field-textarea" placeholder="NewJeans - Ditto&#10;아이유 - 밤편지&#10;https://music.apple.com/…?i=…&#10;https://youtu.be/…&#10;(멜론·스포티파이에서 복사한 ‘곡명/가수’ 두 줄 형식도 됩니다)"></textarea>
+        </div>
+        <div>
+          <span class="field-label">캡처 이미지 (여러 장 가능)</span>
+          <label class="drop" id="drop"><input type="file" accept="image/*" multiple data-act="ocrFile" hidden><span><b>이미지 선택</b> 또는 여기에 끌어다 놓기</span><span class="muted small">스포티파이·애플뮤직·멜론·유튜브뮤직 목록 화면 캡처</span></label>
+          <p class="muted small" id="ocrMsg">글자 인식은 브라우저 안에서 처리되며 이미지는 어디에도 전송되지 않습니다.</p>
+        </div>
+      </div>
+      <p class="muted small" style="margin-top:8px">Spotify 플레이리스트 링크는 곡 목록이 공개되지 않아 불러올 수 없습니다. 플레이리스트에서 곡을 전체 선택(Ctrl/⌘+A) 후 복사(Ctrl/⌘+C)해 붙여넣거나 화면을 캡처해 주세요. Spotify 곡 링크는 곡 제목만 공개되어 동명곡으로 잘못 찾을 수 있습니다.</p>
+      <div class="bulk-foot"><span class="muted small" id="bulkMsg"></span><button type="button" class="btn-primary" data-act="bulkRun" id="bulkRun">곡 찾기</button></div>
+      <div id="importResults"></div>
     </div>
   </div>
 </div>

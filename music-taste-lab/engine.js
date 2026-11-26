@@ -322,19 +322,21 @@ export function refine(res) {
       if (hit) { artist = c; alias = hit; break; }
     }
     const rest = artist ? q.toLowerCase().split(alias.toLowerCase()).join(' ').replace(/\s+/g, ' ').trim() : q;
-    const extraT = [], extraR = [], alts = [];
+    const extraT = [], extraR = [], alts = []; let mbRecs = [];
     if (artist) {
       alts.push(`${artist.name} ${rest}`.trim());
       // 영문 별칭(잔나비 → JANNABI)도 대조해 서비스마다 다른 표기를 같은 가수로 인식
       for (const al of (artist.aliases || []).map((x) => x.name).filter((n) => /^[\x20-\x7E]+$/.test(n)).slice(0, 3)) alts.push(`${al} ${rest}`.trim());
     }
     // 원어 곡명 → ISRC → Deezer 음원
-    const rq = artist ? (rest ? `recording:(${luc(rest)}) AND arid:${artist.id}` : '') : `recording:(${luc(q)}) OR (recording:(${luc(q)}) AND artist:(${luc(q)}))`;
+    const fz = (t) => t.split(/\s+/).filter(Boolean).map((w) => `${luc(w)}~`).join(' ');
+    const rq = artist ? (rest ? `(recording:(${luc(rest)}) OR recording:(${fz(rest)})) AND arid:${artist.id}` : '') : `recording:(${luc(q)}) OR (recording:(${luc(q)}) AND artist:(${luc(q)}))`;
     if (rq) {
       const R = await mb(`recording?query=${enc(rq)}&limit=8`).catch(() => null);
       const want = lite(artist ? rest : q);
-      const okTitle = (r) => (r.score ?? 0) >= 85 && (want.includes(lite(r.title)) || lite(r.title).includes(want));
+      const okTitle = (r) => (r.score ?? 0) >= 70 && (want.includes(lite(r.title)) || lite(r.title).includes(want) || phonSim(r.title, artist ? rest : q) >= 0.75);
       const all = (R?.recordings || []).filter(okTitle);
+      if (artist) mbRecs = all.filter((r) => r.length).slice(0, 4).map((r) => ({ title: r.title, length: r.length }));
       const recs = all.filter((r) => r.isrcs?.length).slice(0, 3);
       // ISRC가 없는 곡: 앨범 바코드 → Deezer 앨범(UPC) → 같은 트랙 번호로 연결
       if (!recs.length && all.length) {
@@ -380,7 +382,18 @@ export function refine(res) {
         });
       }
     }
+    if (artist) { const al = [artist.name, ...(artist.aliases || []).map((x) => x.name)]; extraT.forEach((t) => { t.aliases = al; }); }
     build(out, extraT, alts, extraR);
+    // 마지막 수단: ISRC·바코드로 못 이은 원어 곡명은 같은 가수 곡 중 재생시간이 2.5초 이내로 같은 곡에 연결
+    if (artist && mbRecs.length) {
+      const names = new Set([artist.name, ...(artist.aliases || []).map((x) => x.name)].map(lite));
+      for (const t of out.tracks) {
+        if (!t.durationMs || t.altTitle || !(names.has(lite(primaryArtist(t.artist))) || names.has(lite(t.artist)))) continue;
+        const r = mbRecs.find((x) => Math.abs(x.length - t.durationMs) <= 2500 && dedupeKey(x.title) !== dedupeKey(t.title));
+        if (r) { t.altTitle = t.title; t.title = r.title; t.aliases = [...names]; t.rel += 90; }
+      }
+      out.tracks.sort((a, b) => b.rel - a.rel);
+    }
     // 제목에 그 가수 이름을 붙인 다른 사람의 업로드(커버·리믹스·로파이 버전)는 크게 감점
     if (artist) {
       const an = lite(artist.name), al = lite(alias);
@@ -1067,8 +1080,8 @@ export async function analyzeAlbum(al, onStep = () => {}) {
 }
 
 export async function analyzeArtist(ar, onStep = () => {}) {
-  onStep('대표곡 불러오기(Deezer)');
-  const tracks = await artistTopTracks(ar);
+  onStep('인기곡 불러오기');
+  const tracks = (await artistDetail(ar)).tracks;
   onStep('MusicBrainz에서 아티스트 장르 조회');
   const m = await mbArtistTags(ar.title).catch(() => ({ tags: [], mbUrl: '' }));
   const genres = rankGenres({ tags: m.tags, apple: ar.genre });
@@ -1123,7 +1136,8 @@ async function mbArtistInfo(name) {
   const names = [...new Set([c.name, ...(c.aliases || []).map((y) => y.name)].filter((n) => n && n.length < 40))];
   return { id: c.id, names, country: c.country || c.area?.name || '', begin: c['life-span']?.begin || '', type: c.type || '', disamb: c.disambiguation || '' };
 }
-export async function artistDetail(ar) {
+export function artistDetail(ar) { return cached(`ad:${lite(ar.title)}:${ar.deezerId || ''}`, 10 * 6e4, () => artistDetailRaw(ar)); }
+async function artistDetailRaw(ar) {
   const info = await mbArtistInfo(ar.title).catch(() => null);
   const names = [...new Set([ar.title, ...(info?.names || [])])];
   const want = new Set(names.map(lite));
@@ -1309,4 +1323,77 @@ export function reviewText(it, an, cr) {
   } else if (cr?.found) out.push('위키백과에 해설 문서는 있으나 매체 평점 표는 없습니다.');
   else if (cr) out.push('확인 가능한 공개 평단 자료(위키백과 평점 표)를 찾지 못해, 위 내용은 측정값과 메타데이터만으로 작성했습니다.');
   return out;
+}
+
+/* ───────────── 플레이리스트 가져오기: 텍스트·링크·캡처(OCR) ─────────────
+   - 한 줄 "가수 - 곡", "곡 · 가수", 탭 구분, 번호·재생시간·배지 자동 제거
+   - 구분자가 없는 목록(멜론·스포티파이 복사, 캡처 인식)은 '곡/가수' 두 줄씩 묶어 찾고, 결과 제목이 입력과 맞을 때만 채택
+   - 링크: Apple Music·Deezer(정확), YouTube(영상 제목), Spotify(곡 제목만 공개되어 정확도 낮음) */
+const NOISE_LINE = /^(\d+|\d{1,2}:\d{2}(:\d{2})?|e|explicit|19금|title|타이틀|곡|노래|제목|아티스트|가수|앨범|재생|재생시간|좋아요|더보기|전체재생|셔플|담기|mv|playlist|플레이리스트|song|songs|artist|album|duration|play|shuffle|lyrics|가사|정보|♥|\+|•)$/i;
+function cleanLine(l) {
+  l = l.split(/\s{3,}/)[0].replace(/^[^\p{L}\p{N}]+/u, ''); // 캡처 인식: 넓은 공백 뒤(재생시간·배지 열)와 앞쪽 기호는 버림
+  return l.replace(/\s+\d{3,4}$/, '').replace(/^\s*(\d{1,3}[.)\]:]?\s+|[•·\-*▶►]\s*)/, '').replace(/\s*\b\d{1,2}:\d{2}(:\d{2})?\s*$/, '')
+    .replace(/\s*(\(|\[)?\s*(explicit|19금|title|타이틀곡?|hot|new)\s*(\)|\])?\s*$/i, '').replace(/\s+/g, ' ').trim();
+}
+export function parseImport(text) {
+  const raw = (text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const out = []; const plain = [];
+  for (const l of raw) {
+    let m;
+    if ((m = l.match(/music\.apple\.com\/[^\s]*?(?:[?&]i=|\/song\/[^/\s]+\/)(\d+)/))) out.push({ type: 'apple', id: m[1], src: l });
+    else if ((m = l.match(/deezer\.com\/(?:[a-z]{2}\/)?track\/(\d+)/))) out.push({ type: 'deezer', id: m[1], src: l });
+    else if ((m = l.match(/(?:youtu\.be\/|youtube\.com\/watch\?[^\s]*v=|music\.youtube\.com\/watch\?[^\s]*v=)([\w-]{11})/))) out.push({ type: 'youtube', id: m[1], src: l });
+    else if ((m = l.match(/open\.spotify\.com\/(?:intl-[a-z]+\/)?track\/([A-Za-z0-9]{22})/))) out.push({ type: 'spotify', id: m[1], src: l });
+    else if (/https?:\/\//.test(l)) out.push({ type: 'unsupported', src: l });
+    else { const c = cleanLine(l); if (c && !NOISE_LINE.test(c) && c.length > 1) plain.push(c); }
+  }
+  const sep = /\s+[-–—]\s+|\t|\s+·\s+|\s+\|\s+/;
+  const withSep = plain.filter((l) => sep.test(l)).length;
+  if (plain.length && withSep / plain.length >= 0.5) plain.forEach((l) => out.push({ type: 'text', lines: [l], src: l }));
+  else if (plain.length) out.push({ type: 'pairs', lines: plain, src: plain.join(' / ') });
+  return out;
+}
+// 곡명이 입력 줄과 충분히 겹치는지(짧은 쪽이 긴 쪽의 60% 이상, 3글자 이상) + 가수 확인(발음 대조로 OCR 오인식·한영 표기 허용)
+const covers = (k, t) => k.length >= 2 && t.length >= 2 && (k.includes(t) || t.includes(k)) && Math.min(k.length, t.length) / Math.max(k.length, t.length) >= 0.6;
+const titleOk = (it, lines) => { const t = dedupeKey(it.title), a = dedupeKey(it.altTitle || ''); return lines.some((l) => { const k = dedupeKey(l); return covers(k, t) || (a && covers(k, a)) || (k.length >= 3 && (phonSim(k, t) >= 0.8 || (a && phonSim(k, a) >= 0.8))); }); };
+const artistOk = (it, lines) => { const names = [primaryArtist(it.artist), ...(it.aliases || [])]; const full = lite(it.artist); return lines.some((l) => { const k = lite(l); return names.some((n) => { const a = lite(n); return (k.length >= 2 && (full.includes(k) || (a && k.includes(a)) || a === k)) || phonSim(l, n) >= 0.7; }); }); };
+async function quickFind(q, lines) {
+  const d = await deezer(`search?q=${enc(q)}&limit=10`).catch(() => null);
+  const list = (d?.data || []).map(fromDeezerTrack).filter((it) => !isUnofficial(it));
+  const ok = list.filter((it) => titleOk(it, lines));
+  const needArtist = lines.length >= 2;
+  const best = ok.find((it) => artistOk(it, lines) && !VERSION.test(it.title)) || ok.find((it) => artistOk(it, lines)) || (!needArtist ? ok.find((it) => !VERSION.test(it.title)) : null);
+  if (best) { best.key = itemKey(best); best.srcs = ['deezer']; return best; }
+  const it = await resolveTrack(q).catch(() => null);
+  return it && titleOk(it, lines) && (!needArtist || artistOk(it, lines)) ? it : null;
+}
+// 한 항목(링크 또는 텍스트 묶음)을 곡 목록으로
+export async function resolveImport(e, onFound) {
+  if (e.type === 'apple') { const d = await jsonp(`https://itunes.apple.com/lookup?id=${e.id}&country=KR`).catch(() => null); let r = (d?.results || [])[0]; if (!r) { const d2 = await jsonp(`https://itunes.apple.com/lookup?id=${e.id}&country=US`).catch(() => null); r = (d2?.results || [])[0]; } if (r) { const it = fromAppleSong(r); it.key = itemKey(it); it.srcs = ['apple']; onFound(it, e.src); } else onFound(null, e.src); return; }
+  if (e.type === 'deezer') { const t = await deezer(`track/${e.id}`).catch(() => null); if (t?.id) { const it = fromDeezerTrack(t); it.key = itemKey(it); it.srcs = ['deezer']; onFound(it, e.src); } else onFound(null, e.src); return; }
+  if (e.type === 'youtube' || e.type === 'spotify') {
+    let title = '';
+    try {
+      if (e.type === 'youtube') { const r = await fetch(`https://noembed.com/embed?url=${enc('https://www.youtube.com/watch?v=' + e.id)}`); const j = await r.json(); title = (j.title || '').replace(/\b(official|music video|m\/v|mv|lyrics?|audio|visuali[sz]er|performance video|live clip|teaser|hd|4k)\b/gi, ' ').replace(/[\[\]()【】「」'"“”‘’|]/g, ' ').replace(/\s+/g, ' ').trim(); }
+      else { const r = await fetch(`https://open.spotify.com/oembed?url=${enc('https://open.spotify.com/track/' + e.id)}`); const j = await r.json(); title = j.title || ''; }
+    } catch { title = ''; }
+    if (!title) { onFound(null, e.src); return; }
+    const it = await resolveTrack(title).catch(() => null);
+    if (it) it.uncertain = e.type === 'spotify'; // 스포티파이는 곡 제목만 공개되어 동명곡 오인 가능
+    onFound(it, e.src); return;
+  }
+  if (e.type === 'text') { const l = e.lines[0]; const parts = l.split(/\s+[-–—]\s+|\t|\s+·\s+|\s+\|\s+/).filter(Boolean); onFound(await quickFind(parts.join(' '), parts), l); return; }
+  if (e.type === 'pairs') {
+    const L = e.lines; let i = 0;
+    while (i < L.length) {
+      if (i + 1 < L.length) { const it = await quickFind(`${L[i]} ${L[i + 1]}`, [L[i], L[i + 1]]); if (it) { onFound(it, `${L[i]} / ${L[i + 1]}`); i += 2; continue; } }
+      // 곡명 한 줄로 다시 찾되, 옆 줄(가수)과 맞을 때만 채택 — 동명 커버곡 오채택 방지
+      const nb = [L[i + 1], L[i - 1]].filter(Boolean);
+      const it = await quickFind(L[i], [L[i]]);
+      if (it && (!nb.length || artistOk(it, nb))) { onFound(it, L[i]); i += 1; continue; }
+      if (i + 1 < L.length) { onFound(null, `${L[i]} / ${L[i + 1]}`); i += 2; } else { onFound(null, L[i]); i += 1; }
+    }
+    return;
+  }
+  onFound(null, e.src);
 }
