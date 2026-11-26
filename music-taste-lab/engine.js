@@ -895,22 +895,24 @@ export function evidenceScore(songCr, albumCr) {
     if (agg && r.length >= 1) return { v: (agg.n + r.reduce((a, x) => a + x.n, 0) / r.length) / 2, n: r.length + 1 };
     return r.length >= 2 ? { v: r.reduce((a, x) => a + x.n, 0) / r.length, n: r.length } : agg ? { v: agg.n, n: 1 } : null; };
   const s = avg(songCr), al = avg(albumCr);
-  const acc = songCr?.acc || { lists: 0, wins: 0, noms: 0 };
-  let base = null, why = [];
-  if (s) { base = s.v; why.push(`곡 평점 ${s.n}곳 평균 ${Math.round(s.v)}`); }
-  else if (al) { base = 50 + (al.v - 50) * 0.7; why.push(`수록 앨범 평점 ${al.n}곳 평균 ${Math.round(al.v)}(곡에는 70%만 반영)`); }
-  const bonus = Math.min(12, acc.lists * 1.5 + acc.wins * 3 + acc.noms * 1);
-  if (base == null && (acc.lists + acc.wins + acc.noms) > 0) { base = 68; why.push('평점 표는 없지만 결산·수상 기록 있음'); }
+  const lists = songCr?.acc?.lists || 0;
+  let base = null, strong = false; const why = [];
+  if (s) { base = s.v; strong = s.n >= 3; why.push(`곡 평점 ${s.n}곳 평균 ${Math.round(s.v)}`); }
+  else if (al) { base = 50 + (al.v - 50) * 0.75; strong = al.n >= 5; why.push(`수록 앨범 평점 ${al.n}곳 평균 ${Math.round(al.v)}(곡에는 75%만 반영)`); }
+  if (base == null && lists >= 5) { base = 60 + Math.min(15, lists); why.push('평점 표는 없지만 평단 결산 리스트에 다수 선정'); }
   if (base == null) return null;
-  if (bonus) why.push(`결산 리스트 ${acc.lists}회 · 수상 ${acc.wins}회 · 후보 ${acc.noms}회`);
-  return { score: Math.round(clamp(base + bonus, 0, 100)), why };
+  const bonus = Math.min(10, lists * 0.5);
+  if (lists) why.push(`평단 결산 리스트 ${lists}회 선정`);
+  return { score: Math.round(clamp(base + bonus, 0, 100)), strong, why };
 }
 // 근거 반영: 작·편·혁·유·통을 측정값과 근거 목표치의 평균으로, 상한 5점으로 해제. 근거 없으면 상한 3.5
 export function applyEvidence(axes, src, ev) {
   const a = { ...axes }, sr = { ...src };
   if (!ev) { for (const k of Object.keys(a)) if (a[k] > 3.5) a[k] = 3.5; return { axes: a, src: sr }; }
   const target = clamp(1 + ev.score / 25, 1, 5);
-  for (const k of ['작', '편', '유', '통']) if (a[k] != null) { a[k] = +clamp(0.5 * a[k] + 0.5 * target, 0, 5).toFixed(2); sr[k] = 'mc'; }
+  const w = ev.strong ? 0.7 : 0.5;
+  for (const k of ['작', '편', '유', '통', '연']) { const m = a[k] ?? DEFAULT_UNMEASURED; a[k] = +clamp((1 - w) * m + w * target, 0, 5).toFixed(2); sr[k] = a[k] != null && src[k] === 'm' ? 'mc' : 'c'; }
+  if (a.가 != null) { a.가 = +clamp(0.65 * a.가 + 0.35 * target, 0, 5).toFixed(2); sr.가 = 'mc'; }
   a.혁 = +target.toFixed(2); sr.혁 = 'c';
   return { axes: a, src: sr };
 }
@@ -1219,8 +1221,9 @@ function accolades(wt) {
   let lists = 0, wins = 0, noms = 0;
   for (let i = 1; i + 2 < parts.length; i += 3) {
     const head = parts[i + 1]; const body = (parts[i + 2] || '').split(/\n==[^=]/)[0];
-    if (/(accolade|year-end|critics'? list|ranking|listicle|best-of|awards? and nomination|awards|recognition)/i.test(head)) {
-      lists += (body.match(/^\|-/gm) || []).length;
+    // 평단 결산(매체의 연말·올타임 리스트)만 센다. 차트·판매·인기 시상·기록은 제외(인기는 점수 밖)
+    if (/(critic|listicle|year-end list|best-of|accolade|ranking)/i.test(head) && !/(chart|certif|sales|record|award|nominat|streaming|view)/i.test(head)) {
+      lists += body.split(/^\|-/m).slice(1).filter((row) => !/(chart|billboard|youtube|guinness|grammy|mtv|melon music|golden disc|mama|award)/i.test(row)).length;
       wins += (body.match(/\{\{\s*won\s*\}\}|\|\s*Won\b/gi) || []).length;
       noms += (body.match(/\{\{\s*nom\s*\}\}|\|\s*Nominated\b/gi) || []).length;
     }
