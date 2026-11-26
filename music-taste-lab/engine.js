@@ -897,6 +897,10 @@ export function autoAxes(f, gclass, ex = {}) {
   const ly = ex.lyrics;
   if (ly && ly.instrumental) { src.가 = 'inst'; }
   else if (ly && ly.lines) { parts.ly = 0.4 * band(ly.uniq, 0.45, 0.95, 0.3) + 0.4 * band(ly.mattr, 0.55, 0.92, 0.3) + 0.2 * (1 - clamp((ly.top - 0.15) / 0.3)); ax.가 = 1.2 + 2.8 * parts.ly; src.가 = 'm'; }
+  // 구조적 단순성: 가사 어휘 다양성이 극단적으로 낮으면(반복 위주) 작곡·통일성에도 반영
+  if (ly && ly.lines && ly.mattr < 0.35) { const pen = (0.35 - ly.mattr) * 4; ax.작 -= pen; ax.통 -= pen * 0.6; parts.simple = +pen.toFixed(2); }
+  // 동요·노벨티·태교 장르는 의도적으로 단순한 문법 → 작곡 상한 2.5, 혁신 1.5
+  if ((ex.genres || []).some((g) => /(children|nursery|kids|novelty|lullaby|동요|태교)/i.test(g.name))) { ax.작 = Math.min(ax.작, 2.5); ax.혁 = 1.5; src.혁 = 'm'; parts.kids = true; }
   if (ex.cover && ex.mood) {
     const wantL = 0.25 + 0.5 * ex.mood.valence, wantS = 0.15 + 0.6 * ex.mood.energy;
     parts.coh = clamp(1 - (Math.abs(ex.cover.light - wantL) + Math.abs(ex.cover.sat - wantS)) / 0.8);
@@ -909,19 +913,19 @@ export function autoAxes(f, gclass, ex = {}) {
    위아래 같은 방식으로 반영(평단이 낮으면 내려감). 근거가 없으면 null */
 /* 외부 근거 점수 v5(0~100) — '초월 평론가' 기준: 평단 평점(곡 > 앨범), 정전 목록·평단상, 평단 결산 리스트.
    평단 평점이 낮으면 그만큼 내려가고, 정전 근거는 강하게 올린다. 인기·판매·차트는 넣지 않는다 */
-export function evidenceScore(songCr, albumCr, artistCr) {
+export function evidenceScore(songCr, albumCr, artistCr, opt = {}) {
   const avg = (c) => { const r = (c?.ratings || []).filter((x) => !x.aggregate); const agg = (c?.ratings || []).find((x) => x.aggregate && x.source === 'Metacritic');
     if (agg && r.length >= 1) return { v: (agg.n + r.reduce((a, x) => a + x.n, 0) / r.length) / 2, n: r.length + 1 };
     return r.length >= 2 ? { v: r.reduce((a, x) => a + x.n, 0) / r.length, n: r.length } : agg ? { v: agg.n, n: 1 } : null; };
   const s = avg(songCr), al = avg(albumCr);
-  const canon = [...(songCr?.canon || []).map((c) => ({ ...c, w: 1 })), ...(albumCr?.canon || []).map((c) => ({ ...c, w: 0.6 })), ...(artistCr?.canon || []).map((c) => ({ ...c, w: 0.35 }))];
+  const canon = [...(songCr?.canon || []).map((c) => ({ ...c, w: 1 })), ...(albumCr?.canon || []).map((c) => ({ ...c, w: 0.6 })), ...(artistCr?.canon || []).map((c) => ({ ...c, w: opt.artistWeight ?? 0.35 }))];
   const seen = new Set(); let canonPts = 0; const canonNames = [];
-  for (const c of canon.sort((x, y) => y.pts * y.w - x.pts * x.w)) { if (seen.has(c.name)) continue; seen.add(c.name); canonPts += c.pts * c.w; canonNames.push(c.name + (c.w < 1 ? (c.w === 0.6 ? '(앨범)' : '(아티스트)') : '')); }
+  for (const c of canon.sort((x, y) => y.pts * y.w - x.pts * x.w)) { if (seen.has(c.name)) continue; seen.add(c.name); canonPts += c.pts * c.w; canonNames.push(c.name + (c.w === 0.6 ? '(앨범)' : c.w === (opt.artistWeight ?? 0.35) && artistCr?.canon?.includes(c) ? '(아티스트)' : '')); }
   const lists = songCr?.acc?.lists || 0;
   let base = null, n = 0; const why = [];
   if (s) { base = s.v; n = s.n; why.push(`곡 평점 ${s.n}곳 평균 ${Math.round(s.v)}`); }
   else if (al) { base = 50 + (al.v - 50) * 0.85; n = al.n; why.push(`수록 앨범 평점 ${al.n}곳 평균 ${Math.round(al.v)}`); }
-  if (base == null && (canonPts >= 5 || lists >= 5)) { base = 66; why.push('평점 표는 없지만 정전·결산 근거 있음'); }
+  if (base == null && (canonPts >= 4 || lists >= 5)) { base = 66; why.push('평점 표는 없지만 정전·결산 근거 있음'); }
   if (base == null) return null;
   const bonus = Math.min(24, canonPts) + Math.min(8, lists * 0.6);
   if (canonNames.length) why.push(`정전·평단상: ${canonNames.slice(0, 4).join(', ')}`);
@@ -998,7 +1002,7 @@ export async function analyzeTrack(tr, onStep = () => {}) {
   out.lyrics = ly; out.cover = cov;
   if (out.features) {
     out.mood = moodOf(out.features, out.genres);
-    const a = autoAxes(out.features, out.gclass, { lyrics: ly, cover: cov, mood: out.mood });
+    const a = autoAxes(out.features, out.gclass, { lyrics: ly, cover: cov, mood: out.mood, genres: out.genres });
     out.auto = a.axes; out.parts = a.parts; out.autoSrc = a.src;
     out.vec = vec(out.features, out.mood);
   } else {
@@ -1061,7 +1065,7 @@ async function analyzeSet(tracks, genres, gclass, max, onStep) {
       const f = fixTempo(await analyzeAudio(t.preview), 0);
       const m = moodOf(f, genres);
       const [ly, cov] = await Promise.all([fetchLyrics(t).catch(() => null), coverMetrics(t.artwork).catch(() => null)]);
-      const A = autoAxes(f, gclass, { lyrics: ly, cover: cov, mood: m });
+      const A = autoAxes(f, gclass, { lyrics: ly, cover: cov, mood: m, genres });
       out.push({ title: t.title, artist: t.artist, preview: t.preview, artwork: t.artwork, deezerId: t.deezerId, appleId: t.appleId, durationMs: t.durationMs, rank: t.rank || 0, features: f, mood: m, auto: A.axes, autoSrc: A.src, inst: !!ly?.instrumental, score: musicScore(A.axes, !!ly?.instrumental), vec: vec(f, m) });
     } catch { out.push({ title: t.title, artist: t.artist, preview: t.preview, artwork: t.artwork, deezerId: t.deezerId, failed: true }); }
   }
@@ -1336,9 +1340,13 @@ export function artistCritic(name) {
     const saved = lsGet('ctl:acr:' + lite(name)); if (saved && Date.now() - saved.t < 7 * 864e5) return saved.v;
     let v = { found: false, canon: [] };
     try {
-      const pick = (list) => (list || []).find((r) => lite(r.title).startsWith(lite(name)) || lite(r.title).includes(lite(name)));
-      const en = await wiki('en', `action=query&list=search&srsearch=${enc(`${name} band OR singer OR musician`)}&srlimit=5`).catch(() => null);
-      const ko = await wiki('ko', `action=query&list=search&srsearch=${enc(`${name} 가수 OR 밴드`)}&srlimit=5`).catch(() => null);
+      const info = await mbArtistInfo(name).catch(() => null);
+      const names = [name, ...(info?.names || [])];
+      const enName = names.find((n) => /^[\x20-\x7E]+$/.test(n)) || name, koName = names.find((n) => /[\uAC00-\uD7A3]/.test(n)) || name;
+      const okNames = names.map(lite).filter((x) => x.length >= 2);
+      const pick = (list) => (list || []).find((r) => okNames.some((n) => lite(r.title).startsWith(n) || lite(r.title).includes(n)));
+      const en = await wiki('en', `action=query&list=search&srsearch=${enc(`${enName} band OR singer OR musician`)}&srlimit=5`).catch(() => null);
+      const ko = await wiki('ko', `action=query&list=search&srsearch=${enc(`${koName} 가수 OR 밴드 OR 음악가`)}&srlimit=5`).catch(() => null);
       const he = pick(en?.query?.search), hk = pick(ko?.query?.search);
       const [pe, pk] = await Promise.all([he ? wiki('en', `action=parse&page=${enc(he.title)}&prop=wikitext&redirects=1`).catch(() => null) : null, hk ? wiki('ko', `action=parse&page=${enc(hk.title)}&prop=wikitext&redirects=1`).catch(() => null) : null]);
       const wt = pe?.parse?.wikitext || '', kt = pk?.parse?.wikitext || '';
@@ -1458,4 +1466,62 @@ export async function resolveImport(e, onFound) {
     return;
   }
   onFound(null, e.src);
+}
+
+/* ───────────── 유사 음악: 장르·분위기가 정말 비슷할 때만 ─────────────
+   통과 조건(모두): ① 장르 유사도 ≥ 0.35(MusicBrainz 장르·태그 가중 코사인) ② 분위기 유사도 ≥ 0.62(측정 소리 성향 8차원)
+   ③ 4분면(밝음/아련 × 어쿠스틱/전자) 같은 칸. 후보: Deezer 연관 아티스트 → 각 대표곡 미리듣기 실측 */
+function genreSim(a, b) {
+  if (!a?.length || !b?.length) return null;
+  const A = new Map(a.map((g) => [g.name, g.weight])), B = new Map(b.map((g) => [g.name, g.weight]));
+  let dot = 0, na = 0, nb = 0;
+  for (const [k, v] of A) { na += v * v; if (B.has(k)) dot += v * B.get(k); }
+  for (const v of B.values()) nb += v * v;
+  return dot / Math.sqrt(na * nb || 1);
+}
+function vibeSim(v1, v2) { if (!v1 || !v2) return null; const d = Math.sqrt(v1.reduce((s, x, i) => s + (x - v2[i]) ** 2, 0) / v1.length); return Math.exp(-(d * d) / (2 * 0.16 * 0.16)); }
+const sameQuad = (m1, m2) => m1 && m2 && Math.sign(m1.x || 1e-6) === Math.sign(m2.x || 1e-6) && Math.sign(m1.y || 1e-6) === Math.sign(m2.y || 1e-6);
+export function similarFor(seed, onStep = () => {}) {
+  return cached(`sim:${seed.key}`, 30 * 6e4, async () => {
+    const rel = await relatedArtists(seed.artist, seed.deezerArtistId).catch(() => []);
+    const exclude = new Set([lite(seed.artist)]);
+    const cands = rel.filter((a) => !exclude.has(lite(a.title))).slice(0, 10);
+    const checked = { artists: 0, tracks: 0 };
+    const passArtists = [];
+    for (let i = 0; i < cands.length && passArtists.length < 6; i++) {
+      const a = cands[i]; onStep(`장르 비교 ${i + 1}/${cands.length}: ${a.title}`); checked.artists++;
+      const m = await mbArtistTags(a.title).catch(() => ({ tags: [] }));
+      const g = rankGenres({ tags: m.tags });
+      const gs = genreSim(seed.genres, g);
+      if (gs != null && gs < 0.35) continue;
+      passArtists.push({ a, g, gs });
+    }
+    const tracks = [], artists = [];
+    for (let i = 0; i < passArtists.length; i++) {
+      const { a, g, gs } = passArtists[i];
+      onStep(`분위기 측정 ${i + 1}/${passArtists.length}: ${a.title}`);
+      const top = (await artistTopTracks(a).catch(() => [])).filter((t) => t.preview && !VERSION.test(t.title) && !isUnofficial(t)).slice(0, 3);
+      const vs = [];
+      for (const t of top) {
+        checked.tracks++;
+        try {
+          const f = fixTempo(await analyzeAudio(t.preview), 0); const mo = moodOf(f, g); const v = vec(f, mo);
+          const sim = vibeSim(seed.vec, v);
+          vs.push({ t, f, mo, v, sim });
+        } catch { /* 건너뜀 */ }
+      }
+      const ok = vs.filter((x) => x.sim != null && x.sim >= 0.62 && sameQuad(seed.mood, x.mo));
+      for (const x of ok) tracks.push({ ...x.t, sim: Math.round(100 * (0.5 * (gs ?? 0.5) + 0.5 * x.sim)), why: `${x.mo.words.join('·')} · ${Math.round(x.f.bpm)} BPM · 장르 유사 ${Math.round((gs ?? 0) * 100)} · 분위기 유사 ${Math.round(x.sim * 100)}`, genres: g.slice(0, 2).map((y) => y.ko || y.name) });
+      if (vs.length) {
+        const mv = vs[0].v.map((_, k) => vs.reduce((s, x) => s + x.v[k], 0) / vs.length);
+        const as = vibeSim(seed.vec, mv);
+        const mq = { x: vs.reduce((s, x) => s + x.mo.x, 0) / vs.length, y: vs.reduce((s, x) => s + x.mo.y, 0) / vs.length };
+        if (as >= 0.55 && sameQuad(seed.mood, mq)) artists.push({ ...a, sim: Math.round(100 * (0.5 * (gs ?? 0.5) + 0.5 * as)), genres: g.slice(0, 3).map((y) => y.ko || y.name) });
+      }
+    }
+    tracks.sort((x, y) => y.sim - x.sim); artists.sort((x, y) => y.sim - x.sim);
+    const albums = []; const seenAl = new Set();
+    for (const t of tracks) if (t.album && t.deezerAlbumId && !seenAl.has(t.deezerAlbumId)) { seenAl.add(t.deezerAlbumId); albums.push({ kind: 'album', title: t.album, artist: t.artist, artwork: t.artwork, deezerId: t.deezerAlbumId, sim: t.sim, why: `수록곡 ‘${t.title}’ 기준` }); }
+    return { tracks: tracks.slice(0, 6), artists: artists.slice(0, 5), albums: albums.slice(0, 4), checked };
+  });
 }
