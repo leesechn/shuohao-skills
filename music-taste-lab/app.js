@@ -29,7 +29,7 @@ const S = {
   lib: lsGet(LIB, null) || migrate(),
   manual: lsGet('ctl:manual', {}),
   anti: lsGet('ctl:anti', []),
-  items: new Map(), pending: new Map(), stack: [],
+  items: new Map(), pending: new Map(), stack: [], critic: new Map(),
   btype: 'all', bfilter: '', report: null, rubric: null,
 };
 function migrate() { const old = lsGet('ctl:lib:v1', null); return old ? { entries: old.entries || [], version: old.version || 0, prevTop: old.prevTop || [] } : { entries: [], version: 0, prevTop: [] }; }
@@ -231,7 +231,7 @@ function artistCard(a) {
   const key = reg(a); const on = !!entry(key);
   return `<div class="artist-card"><img src="${esc(art(a))}" alt="" class="artist-avatar" data-act="open" data-key="${esc(key)}" loading="lazy">
     <div class="track-title" data-act="open" data-key="${esc(key)}" style="cursor:pointer">${esc(a.title)}</div>
-    <div class="track-sub" style="margin-bottom:8px">${esc(a.genre || (a.fans ? `팬 ${Number(a.fans).toLocaleString()}명` : '아티스트'))}</div>
+    <div class="track-sub" style="margin-bottom:8px">${esc(a.genre || '아티스트')}</div>
     <div class="row-gap" style="justify-content:center"><button type="button" class="btn-secondary" style="padding:4px 8px;font-size:11px" data-act="open" data-key="${esc(key)}">전체곡</button>
     <button type="button" class="icon-btn${on ? ' added' : ''}" style="width:28px;height:28px" data-act="add" data-key="${esc(key)}" title="아티스트 담기">${on ? '✓' : '+'}</button></div></div>`;
 }
@@ -323,8 +323,29 @@ function openModal(key) {
   if (curKey() !== key) S.stack.push(key);
   modal.hidden = false; document.body.style.overflow = 'hidden';
   renderModal(); mBody.scrollTop = 0;
-  if (it.kind === 'track' && !getAn(key)) analyze(it);
+  const an = getAn(key);
+  if (!an || an.failed) analyze(it); // 곡·앨범·아티스트 모두 열면 바로 분석
   if (it.kind !== 'track' && !detailCache.has(key)) loadDetail(it);
+  if (it.kind !== 'artist' && !S.critic.has(key)) loadCritic(it);
+}
+function loadCritic(it) {
+  const key = it.key; S.critic.set(key, { loading: true });
+  E.criticInfo(it).then((v) => S.critic.set(key, v), () => S.critic.set(key, { found: false, error: true }))
+    .finally(() => { if (curKey() === key) renderModal(); });
+}
+function reviewBlock(it, an) {
+  const cr = S.critic.get(it.key);
+  const paras = E.reviewText(it, an, cr && !cr.loading && !cr.error ? cr : null);
+  let h = `<div class="d-block"><h4>객관적 평론</h4><div class="review">${paras.map((p) => `<p>${esc(p)}</p>`).join('')}</div>`;
+  if (cr?.loading) h += '<p class="muted small">위키백과 평단 자료 확인 중…</p>';
+  if (cr?.found) {
+    if (cr.ratings?.length) h += `<div class="ratings">${cr.ratings.map((r) => `<div class="rating"><span>${esc(r.source)}${r.aggregate ? ' <em>종합</em>' : ''}</span><i style="--w:${Math.round(C(r.n / 100) * 100)}%"></i><b>${esc(r.text)}</b></div>`).join('')}</div>`;
+    const sum = cr.summaryKo || cr.summaryEn;
+    if (sum) h += `<blockquote class="wiki">${esc(sum.slice(0, 520))}${sum.length > 520 ? '…' : ''}</blockquote>`;
+    if (cr.reception) h += `<details class="wiki"><summary>평단 반응 원문 보기(영문 위키백과)</summary><p>${esc(cr.reception)}</p></details>`;
+    h += `<p class="foot">출처: <a href="${esc(safeUrl(cr.koUrl || cr.url))}" target="_blank" rel="noopener noreferrer">위키백과 ‘${esc(cr.title)}’</a> (CC BY-SA 4.0). 평단 점수는 근거로만 표시하고 음악성 점수에는 넣지 않습니다.</p>`;
+  }
+  return h + '</div>';
 }
 function closeModal() { modal.hidden = true; S.stack = []; document.body.style.overflow = ''; }
 async function loadDetail(it) {
@@ -333,6 +354,7 @@ async function loadDetail(it) {
     if (it.kind === 'artist') detailCache.set(key, await E.artistDetail(it));
     else detailCache.set(key, { tracks: await E.albumTracks(it) });
   } catch { detailCache.set(key, { error: true, tracks: [], albums: [] }); }
+  const d = detailCache.get(key); if (d && !d.error && !(d.tracks || []).length) setTimeout(() => detailCache.delete(key), 30000); // 빈 결과는 30초 뒤 다시 시도 가능
   if (curKey() === key) renderModal();
 }
 function renderModal() {
@@ -342,7 +364,9 @@ function renderModal() {
   $('#mThumb').src = art(it); $('#mThumb').style.borderRadius = it.kind === 'artist' ? '999px' : '12px';
   $('#mBadge').textContent = it.kind === 'artist' ? '아티스트' : it.kind === 'album' ? '앨범' : '곡 분석';
   $('#mTitle').textContent = it.title + (it.altTitle && it.altTitle !== it.title ? ` (${it.altTitle})` : '');
-  $('#mSub').textContent = it.kind === 'artist' ? '인기곡 TOP 30 · 발매작 전체 · 아티스트 분석' : [it.artist, it.album !== it.title ? it.album : '', it.year].filter(Boolean).join(' · ');
+  const inf = detailCache.get(key)?.info;
+  const TYPE = { Group: '그룹', Person: '솔로', Orchestra: '오케스트라', Choir: '합창단' };
+  $('#mSub').textContent = it.kind === 'artist' ? (inf ? [inf.country, inf.begin ? `${inf.begin.slice(0, 4)}년 활동 시작` : '', TYPE[inf.type] || '', inf.names?.length ? `다른 표기: ${inf.names.join(', ')}` : ''].filter(Boolean).join(' · ') : '인기곡 TOP 30 · 정식 발매작 · 아티스트 분석') : [it.artist, it.album !== it.title ? it.album : '', it.year].filter(Boolean).join(' · ');
   const on = !!entry(key);
   const add = $('#mAdd'); add.dataset.key = key; add.textContent = on ? '✓ 담김' : '+ 이 항목 담기'; add.classList.toggle('added', on);
   const top = mBody.scrollTop;
@@ -426,7 +450,7 @@ function trackDetail(it) {
   let h = `<div class="row-gap" style="margin-bottom:16px">${it.preview || it.previewAlt ? `<button type="button" class="btn-secondary" data-act="play" data-key="${esc(key)}">▶ 미리듣기</button>` : ''}${chipsHtml(it.artist, it.altTitle || it.title, true)}</div>`;
   if (!an || S.pending.has(key)) return h + progressBlock(key);
   if (an.failed) return h + `<p class="muted">${esc(an.errors?.[0] || '분석 실패')}</p><button type="button" class="btn-secondary" data-act="reanalyze" data-key="${esc(key)}">다시 분석</button>`;
-  h += scoreBlock(key, an) + genreBlock(an) + creditBlock(an, false) + moodBlock(an, it);
+  h += reviewBlock(it, an) + scoreBlock(key, an) + genreBlock(an) + creditBlock(an, false) + moodBlock(an, it);
   h += `<p class="foot">${an.errors?.length ? esc(an.errors.join(' · ')) + '<br>' : ''}분석 한계: 음원 전체가 아닌 30초 미리듣기로 측정했습니다. 템포·조성·느낌은 신호 처리 추정치이고, 멜로디의 매력·가사·혁신성은 기계가 판정할 수 없어 직접 채점 항목으로 남겼습니다. 데이터: Apple iTunes Search API, Deezer API, MusicBrainz(CC0).
     <br><button type="button" class="btn-ghost" style="margin-top:6px" data-act="reanalyze" data-key="${esc(key)}">다시 분석</button></p>`;
   return h;
@@ -439,7 +463,7 @@ function setDetail(it) {
   // 분석 요약
   h += `<div class="d-block"><h4>${it.kind === 'artist' ? '아티스트' : '앨범'} 분석</h4>`;
   if (S.pending.has(key)) h += progressBlock(key).replace('<div class="d-block"><h4>분석 중</h4>', '<div>');
-  else if (!an || an.failed) h += `<p class="muted small">${it.kind === 'artist' ? '대표곡 6곡' : '수록곡 최대 10곡'}의 미리듣기를 분석해 점수·장르·느낌·일관성을 계산합니다.</p><div><button type="button" class="btn-primary" data-act="analyzeSet" data-key="${esc(key)}">${an?.failed ? '다시 분석' : '분석하기'}</button></div>`;
+  else if (!an || an.failed) h += `<p class="muted small">${an?.failed ? '분석에 실패했습니다.' : '분석을 준비 중입니다.'}</p>${an?.failed ? `<div><button type="button" class="btn-primary" data-act="analyzeSet" data-key="${esc(key)}">다시 분석</button></div>` : ''}`;
   else h += setAnalysis(it, an);
   h += '</div>';
   if (!d || d.loading) return h + '<div class="skeleton-box"></div>'.repeat(4);
@@ -447,7 +471,7 @@ function setDetail(it) {
     const fl = S.albumFilter || 'all';
     const albums = (d.albums || []).filter((a) => fl === 'all' || (fl === 'single' ? a.recordType === 'single' : a.recordType !== 'single'));
     h += `<div class="d-block"><div class="section-label" style="margin:0"><span>인기곡 TOP ${d.tracks.length}</span>${d.tracks.length ? '<button type="button" class="btn-secondary" data-act="addTop5">+ 상위 5곡 담기</button>' : ''}</div>
-      <div class="track-list">${d.tracks.map((t, i) => trackRow(t, i + 1)).join('') || '<p class="muted small">인기곡을 불러오지 못했습니다.</p>'}</div></div>
+      <div class="track-list">${d.tracks.map((t, i) => trackRow(t, i + 1)).join('') || `<p class="muted small">인기곡을 불러오지 못했습니다. <button type="button" class="btn-ghost" data-act="reloadDetail" data-key="${esc(key)}">다시 불러오기</button></p>`}</div></div>
       <div class="d-block"><div class="section-label" style="margin:0"><span>발매작 (${albums.length} · 최신순)</span>
         <span class="pill-group">${[['all', `전체 (${(d.albums || []).length})`], ['album', '정규·EP'], ['single', '싱글']].map(([k, l]) => `<button type="button" class="pill${fl === k ? ' active' : ''}" data-act="albumFilter" data-f="${k}">${l}</button>`).join('')}</span></div>
       <div class="album-grid">${albums.map(albumCard).join('') || '<p class="muted small">발매작이 없습니다.</p>'}</div></div>`;
@@ -461,7 +485,7 @@ function moodWord(m) { const a = m.arousal, v = m.valence; if (a > 0.62) return 
 function setAnalysis(it, an) {
   const key = it.key, sc = scoreOf(it.kind, an, key), man = S.manual[key]?.axes || {};
   const ok = (an.analyzed || []).filter((t) => !t.failed);
-  let h = '';
+  let h = it.kind === 'album' ? reviewBlock(it, an) : '';
   if (sc) {
     const g = E.grade(sc.score);
     const label = it.kind === 'album'
@@ -787,13 +811,14 @@ document.addEventListener('click', (e) => {
     case 'mClose': closeModal(); break;
     case 'mBack': S.stack.pop(); renderModal(); break;
     case 'mAdd': toggleItem(key); break;
+    case 'reloadDetail': { const it = S.items.get(key); if (it) { detailCache.delete(key); loadDetail(it); renderModal(); } break; }
     case 'albumFilter': S.albumFilter = el.dataset.f; renderModal(); break;
     case 'addTop5': { const d = detailCache.get(curKey()); let n = 0; (d?.tracks || []).slice(0, 5).forEach((t) => { if (addItem(t, true)) n++; }); afterLibChange(); toast(`인기곡 ${n}곡을 담았습니다.`); break; }
     case 'addAll': { const k = curKey(); const it = S.items.get(k); const d = detailCache.get(k); let n = 0; (d?.tracks || []).forEach((t) => { if (addItem({ ...t, album: t.album || it.title }, true)) n++; }); afterLibChange(); toast(`수록곡 ${n}곡을 담았습니다.`); break; }
     case 'analyzeSet': { const it = S.items.get(key); if (it) { const ent = entry(key); if (ent?.an?.failed) ent.an = null; analyze(it); renderModal(); } break; }
     case 'reanalyze': { const ent = entry(key); if (ent) { ent.an = null; saveLib(); } try { localStorage.removeItem('ctl:a:' + key); } catch { /* 무시 */ } const it = S.items.get(key) || ent?.item; if (it) { reg(it); analyze(it); renderModal(); } break; }
     case 'resetAxes': delete S.manual[key]; saveManual(); renderModal(); renderBasket(); break;
-    case 'toRubric': { const it = S.items.get(key); if (!it) break; closeModal(); $('#rTitle').value = it.title; $('#rArtist').value = it.artist || ''; S.rubric = { axes: { ...RD }, src: {}, an: getAn(key), item: it }; const an = S.rubric.an; if (an?.auto) for (const k of Object.keys(an.auto)) { S.rubric.axes[k] = Math.round(an.auto[k] * 2) / 2; S.rubric.src[k] = 'm'; } const man = S.manual[key]?.axes || {}; Object.assign(S.rubric.axes, man); setTab('rubric'); break; }
+    case 'toRubric': { const it = S.items.get(key); if (!it) break; closeModal(); $('#rTitle').value = it.title; $('#rArtist').value = it.artist || ''; S.rubric = { axes: { ...RD }, src: {}, an: getAn(key), item: it }; const an = S.rubric.an; if (an?.auto) for (const k of Object.keys(an.auto)) { S.rubric.axes[k] = Math.round(an.auto[k] * 2) / 2; S.rubric.src[k] = 'm'; } const man = S.manual[key]?.axes || {}; Object.assign(S.rubric.axes, man); const cr = S.critic.get(key); $('#rEvidence').value = cr?.ratings?.filter((r) => !r.aggregate).length >= 2 ? 'A' : 'C'; setTab('rubric'); break; }
     case 'measure': measureRubric(); break;
     case 'rSave': { const it = S.rubric.item; if (!it) break; S.manual[it.key] = { ...(S.manual[it.key] || {}), axes: { ...S.rubric.axes }, inst: $('#rInst').checked }; saveManual(); renderBasket(); toast(entry(it.key) ? '바구니의 곡 점수에 반영했습니다.' : '저장했습니다. 이 곡을 담으면 이 점수로 표시됩니다.'); break; }
     case 'copyCard': navigator.clipboard?.writeText(S.cardText || '').then(() => toast('취향 프로필 카드를 복사했습니다.'), () => toast('복사하지 못했습니다. 카드 내용을 직접 선택해 주세요.')); break;

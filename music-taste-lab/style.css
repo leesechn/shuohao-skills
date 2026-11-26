@@ -221,6 +221,20 @@ img { display: block; max-width: 100%; }
 .minibar i { flex: 1; height: 4px; background: var(--bg-hover); border-radius: 2px; position: relative; overflow: hidden; }
 .minibar i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 0%); background: var(--accent); }
 
+/* 객관적 평론 */
+.review { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.75; }
+.ratings { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); }
+.rating { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr) 4.2em; gap: 10px; align-items: center; font-size: 13px; }
+.rating span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rating span em { font-style: normal; font-size: 10px; color: var(--amber-text); }
+.rating i { height: 6px; border-radius: 3px; background: var(--bg-hover); position: relative; overflow: hidden; }
+.rating i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 0%); background: var(--amber); }
+.rating b { text-align: right; font-variant-numeric: tabular-nums; }
+blockquote.wiki { margin: 0; padding: 10px 14px; border-left: 3px solid var(--accent-border); background: var(--bg-elevated); border-radius: 0 10px 10px 0; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+details.wiki { font-size: 12.5px; color: var(--text-secondary); }
+details.wiki summary { cursor: pointer; font-weight: 600; color: var(--accent-hover); padding: 4px 0; }
+details.wiki p { margin-top: 6px; line-height: 1.65; }
+
 /* 채점 탭 */
 .rubric-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (min-width: 960px) { .rubric-layout { grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); } }

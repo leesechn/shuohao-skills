@@ -117,7 +117,7 @@ function fromDeezerTrack(t) {
   return {
     kind: 'track', title: t.title, artist: t.artist?.name, album: t.album?.title, year: '',
     artwork: t.album?.cover_xl || t.album?.cover_big || '', preview: t.preview || '', previewAlt: t.preview || '', deezerId: t.id, deezerUrl: t.link,
-    deezerAlbumId: t.album?.id, deezerArtistId: t.artist?.id, durationMs: (t.duration || 0) * 1000, genre: '', explicit: !!t.explicit_lyrics,
+    deezerAlbumId: t.album?.id, deezerArtistId: t.artist?.id, durationMs: (t.duration || 0) * 1000, genre: '', explicit: !!t.explicit_lyrics, rank: t.rank || 0,
   };
 }
 function fromAppleAlbum(r) {
@@ -136,7 +136,7 @@ function fromAppleArtist(r) {
   return { kind: 'artist', title: r.artistName, artist: r.artistName, artwork: '', appleUrl: r.artistLinkUrl, appleId: r.artistId, genre: r.primaryGenreName || '' };
 }
 function fromDeezerArtist(a) {
-  return { kind: 'artist', title: a.name, artist: a.name, artwork: a.picture_xl || a.picture_big || '', deezerId: a.id, deezerUrl: a.link, fans: a.nb_fan, genre: '' };
+  return { kind: 'artist', title: a.name, artist: a.name, artwork: a.picture_xl || a.picture_big || '', deezerId: a.id, deezerUrl: a.link, genre: '' };
 }
 
 export function itemKey(it) {
@@ -145,11 +145,22 @@ export function itemKey(it) {
     : `${it.kind}|${dedupeKey(it.title)}|${dedupeKey(primaryArtist(it.artist))}`;
 }
 
+// 정식 발매가 아닌 것(노래방·커버·속도 변형·자장가·컴필레이션 업로드 등)은 검색어가 그런 버전을 찾을 때만 보여 준다
+const UNOFFICIAL = /\b(karaoke|in the style of|originally performed|made famous|tribute|lullaby|music box|8[- ]?bit|sped up|slowed|nightcore|ringtone|cover version|piano cover|instrumental cover|reverb version)\b|노래방|가라오케|자장가|오르골|\bMR\b|커버|원곡가수|原曲歌手|カラオケ|オルゴール/i;
+const UNOFFICIAL_ARTIST = /(karaoke|tribute|lullaby|piano guy|music box|cover band|cover hits|sleep music|baby music|playground4music|歌っちゃ王)|__/i;
+export function isUnofficial(it, q = '') {
+  if (UNOFFICIAL.test(q)) return false;
+  if (UNOFFICIAL.test(it.title || '') || UNOFFICIAL.test(it.album || '')) return true;
+  if (it.kind !== 'artist' && UNOFFICIAL_ARTIST.test(it.artist || '')) return true;
+  if (it.kind === 'artist' && UNOFFICIAL_ARTIST.test(it.title || '')) return true;
+  if (it.kind === 'album' && (/^various artists$/i.test(it.artist || '') || it.recordType === 'compile')) return true;
+  return false;
+}
 function merge(lists, q, alts = []) {
   const map = new Map(), idx = new Map();
   for (const { items, src } of lists) {
     items.forEach((raw, i) => {
-      if (!raw || !raw.title) return;
+      if (!raw || !raw.title || isUnofficial(raw, q)) return;
       const it = { ...raw, srcs: [src] };
       it.key = itemKey(it);
       const who = it.kind === 'artist' ? '' : it.artist;
@@ -968,33 +979,171 @@ export async function relatedArtists(name, id) {
   return (d?.data || []).map(fromDeezerArtist);
 }
 
-/* ───────────── 아티스트 상세: 인기곡 TOP 30 + 발매작 전체 ───────────── */
+/* ───────────── 아티스트 상세: 인기곡 TOP 30 + 정식 발매작 ─────────────
+   국내 인디 가수는 Deezer에 한글 이름 빈 페이지와 영문 이름 실제 페이지가 따로 있는 경우가 많아(잔나비/JANNABI, 검정치마/The Black Skirts)
+   MusicBrainz 별칭으로 같은 사람의 페이지를 모두 찾아 합치고, 그래도 부족하면 Apple 곡 목록으로 채운다 */
+async function mbArtistInfo(name) {
+  const A = await mb(`artist?query=${enc(luc(name))}&limit=6`);
+  const c = (A.artists || []).find((x) => (x.score ?? 0) >= 80 && [x.name, x['sort-name'], ...(x.aliases || []).map((y) => y.name)].some((n) => n && lite(n) === lite(name)));
+  if (!c) return null;
+  const names = [...new Set([c.name, ...(c.aliases || []).map((y) => y.name)].filter((n) => n && n.length < 40))];
+  return { id: c.id, names, country: c.country || c.area?.name || '', begin: c['life-span']?.begin || '', type: c.type || '', disamb: c.disambiguation || '' };
+}
 export async function artistDetail(ar) {
-  let id = ar.deezerId;
-  if (!id) {
-    const s = await deezer(`search/artist?q=${enc(ar.title)}&limit=5`).catch(() => null);
-    const best = (s?.data || []).find((a) => lite(a.name) === lite(ar.title)) || (s?.data || [])[0];
-    if (best) { id = ar.deezerId = best.id; ar.artwork = ar.artwork || best.picture_xl; }
-  }
-  const [top, albs, apl] = await Promise.all([
-    id ? deezer(`artist/${id}/top?limit=30`).then((d) => d.data || []).catch(() => []) : [],
-    id ? deezer(`artist/${id}/albums?limit=100`).then((d) => d.data || []).catch(() => []) : [],
-    ar.appleId ? jsonp(`https://itunes.apple.com/lookup?id=${ar.appleId}&entity=album&limit=200&country=KR`).then((d) => (d.results || []).filter((r) => r.wrapperType === 'collection')).catch(() => []) : [],
+  const info = await mbArtistInfo(ar.title).catch(() => null);
+  const names = [...new Set([ar.title, ...(info?.names || [])])];
+  const want = new Set(names.map(lite));
+  const latin = names.filter((n) => /^[\x20-\x7E]+$/.test(n));
+  const probe = [...new Set([ar.title, ...latin, ...names])].slice(0, 4);
+  const dzIds = new Set(ar.deezerId ? [ar.deezerId] : []);
+  const found = await Promise.all(probe.map((n) => deezer(`search/artist?q=${enc(n)}&limit=6`).catch(() => null)));
+  for (const f of found) for (const a of f?.data || []) if (want.has(lite(a.name))) { dzIds.add(a.id); if (!ar.artwork && a.picture_xl) ar.artwork = a.picture_xl; }
+  const ids = [...dzIds].slice(0, 4);
+  const [tops, albs] = await Promise.all([
+    Promise.all(ids.map((id) => deezer(`artist/${id}/top?limit=30`).then((d) => d.data || []).catch(() => []))),
+    Promise.all(ids.map((id) => deezer(`artist/${id}/albums?limit=100`).then((d) => d.data || []).catch(() => []))),
   ]);
-  const tracks = top.map(fromDeezerTrack);
-  const map = new Map();
-  for (const a of albs) {
-    const it = { kind: 'album', title: a.title, artist: ar.title, year: yearOf(a.release_date), date: a.release_date || '', artwork: a.cover_xl || a.cover_big || '', deezerId: a.id, deezerUrl: a.link, recordType: a.record_type, srcs: ['deezer'] };
-    it.key = itemKey(it); map.set(dedupeKey(a.title), it);
+  // Apple 아티스트 ID(검색어별 영문 이름으로 찾기)
+  let appleId = ar.appleId;
+  if (!appleId) {
+    for (const n of [...latin, ar.title].slice(0, 3)) {
+      const r = await apple(`term=${enc(n)}&media=music&entity=musicArtist&limit=5&country=US`).catch(() => []);
+      const hit = r.find((x) => want.has(lite(x.artistName))); if (hit) { appleId = hit.artistId; break; }
+    }
   }
-  for (const r of apl) {
-    const t = r.collectionName.replace(/ - (Single|EP)$/i, '');
-    const k = dedupeKey(t);
+  const lookup = (entity, country) => (appleId ? jsonp(`https://itunes.apple.com/lookup?id=${appleId}&entity=${entity}&limit=200&country=${country}`).then((d) => (d.results || []).slice(1)).catch(() => []) : Promise.resolve([]));
+  let aAlb = await lookup('album', 'KR'); if (!aAlb.length) aAlb = await lookup('album', 'US');
+  // 인기곡: Deezer 순위(rank)로 정렬, 30곡이 안 되면 Apple 곡으로 보충
+  const tmap = new Map();
+  for (const t of tops.flat().sort((x, y) => (y.rank || 0) - (x.rank || 0))) {
+    const it = fromDeezerTrack(t); if (isUnofficial(it)) continue;
+    const k = dedupeKey(it.title); if (!tmap.has(k)) tmap.set(k, it);
+  }
+  if (tmap.size < 15) {
+    let aSongs = await lookup('song', 'KR'); if (!aSongs.length) aSongs = await lookup('song', 'US');
+    for (const r of aSongs.filter((x) => x.wrapperType === 'track')) {
+      const it = fromAppleSong(r); if (isUnofficial(it)) continue;
+      const k = dedupeKey(it.title); if (!tmap.has(k)) tmap.set(k, it);
+      if (tmap.size >= 30) break;
+    }
+  }
+  const tracks = [...tmap.values()].slice(0, 30);
+  // 발매작: 컴필레이션·다른 가수 앨범 제외
+  const amap = new Map();
+  for (const a of albs.flat()) {
+    if (a.record_type === 'compile') continue;
+    const it = { kind: 'album', title: a.title, artist: info?.names?.[0] && ar.title, year: yearOf(a.release_date), date: a.release_date || '', artwork: a.cover_xl || a.cover_big || '', deezerId: a.id, deezerUrl: a.link, recordType: a.record_type, srcs: ['deezer'] };
+    it.artist = ar.title;
+    if (isUnofficial(it)) continue;
+    it.key = itemKey(it); const k = dedupeKey(a.title); if (!amap.has(k)) amap.set(k, it);
+  }
+  for (const r of aAlb.filter((x) => x.wrapperType === 'collection')) {
+    if (/various artists/i.test(r.artistName || '')) continue;
+    const t = r.collectionName.replace(/ - (Single|EP)$/i, ''); const k = dedupeKey(t);
     const single = / - Single$/i.test(r.collectionName) || r.trackCount <= 3;
-    if (map.has(k)) { const p = map.get(k); p.appleId = p.appleId || r.collectionId; p.appleUrl = r.collectionViewUrl; continue; }
-    const it = { kind: 'album', title: t, artist: r.artistName, year: yearOf(r.releaseDate), date: (r.releaseDate || '').slice(0, 10), artwork: art600(r.artworkUrl100), appleId: r.collectionId, appleUrl: r.collectionViewUrl, trackCount: r.trackCount, recordType: single ? 'single' : 'album', srcs: ['apple'] };
-    it.key = itemKey(it); map.set(k, it);
+    if (amap.has(k)) { const p = amap.get(k); p.appleId = p.appleId || r.collectionId; p.appleUrl = r.collectionViewUrl; continue; }
+    const it = { kind: 'album', title: t, artist: r.artistName, year: yearOf(r.releaseDate), date: (r.releaseDate || '').slice(0, 10), artwork: art600(r.artworkUrl100), appleId: r.collectionId, appleUrl: r.collectionViewUrl, trackCount: r.trackCount, recordType: single ? 'single' : / - EP$/i.test(r.collectionName) ? 'ep' : 'album', srcs: ['apple'] };
+    if (isUnofficial(it)) continue;
+    it.key = itemKey(it); amap.set(k, it);
   }
-  const albums = [...map.values()].sort((a, b) => String(b.date || b.year).localeCompare(String(a.date || a.year)));
-  return { tracks, albums };
+  const albums = [...amap.values()].sort((x, y) => String(y.date || y.year).localeCompare(String(x.date || x.year)));
+  return { tracks, albums, info: info ? { country: info.country, begin: info.begin, type: info.type, names: names.filter((n) => n !== ar.title).slice(0, 4) } : null };
+}
+
+/* ───────────── 평단 정보: 위키백과 평점 표(Music ratings)·평단 반응·개요 ─────────────
+   점수에는 넣지 않고 근거로만 보여 준다(루브릭 규칙: 수상·평론은 근거로만) */
+const WIKI_H = { 'Api-User-Agent': 'Cheongeumsil/1.0 (https://cheongeumsil.higgsfield.app)' }; // 위키미디어 권장 앱 식별 헤더
+const wiki = (lang, params) => fetch(`https://${lang}.wikipedia.org/w/api.php?${params}&format=json&formatversion=2&origin=*`, { headers: WIKI_H }).then((r) => { if (!r.ok) throw new Error('wiki ' + r.status); return r.json(); });
+function stripWiki(t) {
+  let s = (t || '').replace(/<ref[^>]*\/>/g, '').replace(/<ref[\s\S]*?<\/ref>/g, '').replace(/<!--[\s\S]*?-->/g, '');
+  for (let i = 0; i < 6; i++) s = s.replace(/\{\{[^{}]*\}\}/g, '');
+  return s.replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g, '$1').replace(/\[https?:\/\/\S+\s([^\]]+)\]/g, '$1').replace(/'{2,}/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+function parseRatings(wt) {
+  const m = wt.match(/\{\{\s*(?:Music|Album) ratings([\s\S]*?)\n\}\}/i); if (!m) return [];
+  const body = m[1]; const out = [];
+  const get = (k) => { const r = body.match(new RegExp(`\\|\\s*${k}\\s*=\\s*([^\\n|]*(?:\\{\\{[^}]*\\}\\}[^\\n|]*)?)`, 'i')); return r ? r[1] : ''; };
+  const norm = (raw) => {
+    const r = raw.match(/\{\{\s*rating\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/i); if (r) return { text: `${r[1]}/${r[2]}`, n: (100 * +r[1]) / +r[2] };
+    const f = raw.replace(/<ref[\s\S]*/i, '').match(/([\d.]+)\s*\/\s*(\d+)/); if (f) return { text: `${f[1]}/${f[2]}`, n: (100 * +f[1]) / +f[2] };
+    const g = stripWiki(raw).match(/^(A\+|A−|A-|A|B\+|B−|B-|B|C\+|C−|C-|C|D\+|D|E|F)\b/); if (g) { const G = { 'A+': 100, A: 95, 'A−': 90, 'A-': 90, 'B+': 85, B: 80, 'B−': 75, 'B-': 75, 'C+': 70, C: 65, 'C−': 60, 'C-': 60, 'D+': 55, D: 50, E: 40, F: 30 }; return { text: g[1], n: G[g[1]] }; }
+    return null;
+  };
+  for (const [lab, k] of [['Metacritic', 'MC'], ['AnyDecentMusic?', 'ADM'], ['AOTY', 'AOTY']]) { const v = norm(get(k)); if (v) out.push({ source: lab, ...v, aggregate: true }); }
+  for (let i = 1; i <= 30; i++) { const name = stripWiki(get(`rev${i}`)); if (!name) continue; const v = norm(get(`rev${i}score`)); if (v) out.push({ source: name, ...v }); }
+  return out;
+}
+function receptionPara(wt) {
+  const sec = wt.split(/\n==+\s*(Critical reception|Reception|Critical response)\s*==+\n/i)[2];
+  if (!sec) return '';
+  const body = sec.split(/\n==/)[0].replace(/\{\{\s*(?:Music|Album) ratings[\s\S]*?\n\}\}/i, '');
+  const para = body.split(/\n\s*\n/).map(stripWiki).find((p) => p.length > 80);
+  return para ? para.slice(0, 700) + (para.length > 700 ? '…' : '') : '';
+}
+export function criticInfo(it) {
+  const title = (it.altTitle || it.title || '').replace(/\s*[([].*?[)\]]\s*/g, ' ').trim();
+  const artist = primaryArtist(it.artist || '');
+  const kindWord = it.kind === 'album' ? 'album' : 'song';
+  return cached(`cr:${it.kind}:${lite(title)}:${lite(artist)}`, 36e5, async () => {
+    const saved = lsGet('ctl:cr:' + lite(title + artist + kindWord)); if (saved && Date.now() - saved.t < 7 * 864e5) return saved.v;
+    const pick = (list) => (list || []).find((r) => { const pt = lite(r.title), sn = lite((r.snippet || '').replace(/<[^>]+>/g, '')); return pt.startsWith(lite(title)) && (sn.includes(lite(artist)) || pt.includes(lite(artist)) || sn.includes(kindWord)); });
+    let lang = 'en', hit = null;
+    const en = await wiki('en', `action=query&list=search&srsearch=${enc(`${title} ${artist} ${kindWord}`)}&srlimit=6`).catch(() => null);
+    hit = pick(en?.query?.search);
+    if (!hit) { const ko = await wiki('ko', `action=query&list=search&srsearch=${enc(`${title} ${artist}`)}&srlimit=6`).catch(() => null); hit = pick(ko?.query?.search); if (hit) lang = 'ko'; }
+    let v = { found: false };
+    if (hit) {
+      const P = await wiki(lang, `action=parse&page=${enc(hit.title)}&prop=wikitext|langlinks&redirects=1`).catch(() => null);
+      const wt = P?.parse?.wikitext || '';
+      const koTitle = lang === 'ko' ? hit.title : (P?.parse?.langlinks || []).find((l) => l.lang === 'ko')?.title;
+      const sum = async (l, t) => { try { const r = await fetch(`https://${l}.wikipedia.org/api/rest_v1/page/summary/${enc(t.replace(/ /g, '_'))}`, { headers: WIKI_H }); return r.ok ? (await r.json()).extract || '' : ''; } catch { return ''; } };
+      const ratings = parseRatings(wt);
+      const crit = ratings.filter((r) => !r.aggregate);
+      v = {
+        found: true, title: hit.title, url: `https://${lang}.wikipedia.org/wiki/${enc(hit.title.replace(/ /g, '_'))}`,
+        koUrl: koTitle ? `https://ko.wikipedia.org/wiki/${enc(koTitle.replace(/ /g, '_'))}` : '',
+        summaryKo: koTitle ? await sum('ko', koTitle) : '', summaryEn: lang === 'en' ? await sum('en', hit.title) : '',
+        ratings, avg: crit.length ? Math.round(crit.reduce((a, r) => a + r.n, 0) / crit.length) : null,
+        reception: lang === 'en' ? receptionPara(wt) : '',
+      };
+    }
+    lsSet('ctl:cr:' + lite(title + artist + kindWord), { t: Date.now(), v });
+    return v;
+  });
+}
+
+/* ───────────── 측정·공개 데이터 기반 평론문 ───────────── */
+const josa = (w, a, b) => { const c = (w || '').charCodeAt((w || '').length - 1) - 0xAC00; return c >= 0 && c < 11172 && c % 28 ? a : b; };
+export function reviewText(it, an, cr) {
+  const out = [];
+  const g = (an.genres || []).slice(0, 2).map((x) => x.ko || x.name);
+  const who = it.kind === 'album' ? `${it.artist}의 ${it.recordType === 'single' ? '싱글' : it.recordType === 'ep' ? 'EP' : '앨범'}` : `${it.artist}의 곡`;
+  out.push(`${it.title}${josa(it.title, '은', '는')} ${it.year ? it.year + '년에 발매된 ' : ''}${who}입니다.${g.length ? ` 공개 데이터베이스의 장르 태그로는 ${g.join('·')} 계열로 분류됩니다.` : ''}`);
+  const f = an.features, m = an.mood;
+  if (it.kind === 'track' && f) {
+    const sound = [`템포는 약 ${Math.round(f.bpm)} BPM, 조성은 ${f.keyName}${Math.abs(f.modeMargin) < 0.1 ? '(장·단조 판정 불확실)' : ''}`];
+    if (m) sound.push(`에너지 ${Math.round(m.energy * 100)}/100으로 ${m.words.join('·')} 쪽`);
+    out.push(`사운드: ${sound.join(', ')}입니다.${m?.texture?.length ? ` 측정에서 드러난 질감은 ${m.texture.slice(0, 3).join(', ')}입니다.` : ''}`);
+    const P = an.parts || {}; const good = [], weak = [];
+    if (P.dynamics != null) (P.dynamics >= 0.8 ? good : P.dynamics < 0.5 ? weak : []).push(P.dynamics >= 0.8 ? `다이내믹 레인지 ${f.dr}dB로 장르 기준 범위 안` : `다이내믹 레인지 ${f.dr}dB로 장르 기준에서 벗어남`);
+    if (P.width != null) (P.width >= 0.8 ? good : P.width < 0.5 ? weak : []).push(P.width >= 0.8 ? '스테레오 공간 배치가 안정적' : '스테레오 폭이 좁거나 과함');
+    if (P.variation != null) (P.variation >= 0.8 ? good : P.variation < 0.5 ? weak : []).push(P.variation >= 0.8 ? '구간별 음색 변화가 적절' : '음색 변화가 단조롭거나 산만함');
+    if (P.harmony != null) (P.harmony >= 0.8 ? good : P.harmony < 0.5 ? weak : []).push(P.harmony >= 0.8 ? '화성 움직임이 정체되지도 산만하지도 않음' : f.harmonicChange < 0.1 ? '화성 변화가 적어 반복적' : '화성 변화가 많아 산만할 수 있음');
+    if (good.length) out.push(`측정상 강점: ${good.join(', ')}.`);
+    if (weak.length) out.push(`측정상 약점: ${weak.join(', ')}.`);
+  }
+  if (it.kind !== 'track') {
+    const ok = (an.analyzed || []).filter((t) => !t.failed);
+    if (ok.length) {
+      const best = [...ok].sort((a, b) => b.score - a.score)[0], worst = [...ok].sort((a, b) => a.score - b.score)[0];
+      out.push(`분석한 ${ok.length}곡의 평균 템포는 ${Math.round(ok.reduce((s, t) => s + t.features.bpm, 0) / ok.length)} BPM이고, ${an.cohesion != null ? `곡 간 소리 일관성은 ${Math.round(an.cohesion * 100)}/100으로 ${an.cohesion >= 0.7 ? '하나의 색이 뚜렷합니다' : an.cohesion >= 0.45 ? '적당히 다양합니다' : '곡마다 방향이 크게 다릅니다'}.` : ''}`);
+      if (ok.length > 1) out.push(`측정 점수가 가장 높은 곡은 ‘${best.title}’(${best.score.toFixed(1)}), 가장 낮은 곡은 ‘${worst.title}’(${worst.score.toFixed(1)})입니다.`);
+    }
+  }
+  if (cr?.found && cr.ratings?.length) {
+    const crit = cr.ratings.filter((r) => !r.aggregate); const agg = cr.ratings.filter((r) => r.aggregate);
+    out.push(`평단: ${[...agg, ...crit].slice(0, 6).map((r) => `${r.source} ${r.text}`).join(', ')}${cr.avg != null ? ` (매체 ${crit.length}곳 환산 평균 ${cr.avg}/100)` : ''}. 평단 점수는 근거로만 표시하고 음악성 점수에는 넣지 않습니다.`);
+  } else if (cr?.found) out.push('위키백과에 해설 문서는 있으나 매체 평점 표는 없습니다.');
+  else if (cr) out.push('확인 가능한 공개 평단 자료(위키백과 평점 표)를 찾지 못해, 위 내용은 측정값과 메타데이터만으로 작성했습니다.');
+  return out;
 }
