@@ -884,49 +884,61 @@ export function autoAxes(f, gclass, ex = {}) {
     vocab: band(ch.distinct, 3, 8, 2.5), surprise: band(ch.nondia, 0.04, 0.3, 0.15), motion: band(ch.changeRate, 0.8, 4, 1.5),
     phrase: band(f.phraseDyn ?? 0, 1.2, 5, 1.8), arc: band(f.arc ?? 0, 0.55, 0.93, 0.3), moment: clamp(((f.novelty ?? 1) - 1.6) / 2.2),
   };
-  // 측정은 '결함 판별' 위주: 결함이 없으면 3점 안팎, 뚜렷한 결함이 있으면 2점 쪽. 30초 구간 신호로는 장르 차이를 품질 차이로 오판하기 쉬워 폭을 좁게 둔다
+  // 측정 v5: 강점·약점을 넓은 폭(1.3~4.0)으로. 장르 문법을 존중 — 댄스·힙합·전자는 코드 수보다 리듬 설계, 발라드·포크는 화성·강약을 본다
   const ax = {}, src = {};
-  ax.편 = 2.0 + 1.5 * (0.28 * parts.dynamics + 0.17 * parts.crest + 0.2 * parts.balance + 0.15 * parts.width + 0.2 * parts.variation); src.편 = 'm';
-  ax.작 = 2.3 + 1.0 * (0.25 * parts.vocab + 0.25 * parts.surprise + 0.2 * parts.motion + 0.15 * parts.harmony + 0.15 * parts.tonal); src.작 = 'm';
-  ax.통 = 2.5 + 0.8 * parts.arc; src.통 = 'm';
-  ax.유 = 2.2 + 1.2 * parts.moment; src.유 = 'm';
+  const groove = gclass === 'electronic' || gclass === 'hiphop';
+  const rhythm = 0.5 * clamp((f.pulse - 0.25) / 0.5) + 0.5 * band(f.onsetRate, 2.5, 6, 2);
+  const harmonic = 0.3 * parts.vocab + 0.3 * parts.surprise + 0.2 * parts.motion + 0.2 * parts.tonal;
+  const static_ = ch.distinct <= 1 && ch.changeRate === 0;
+  ax.작 = 1.3 + 2.7 * (groove ? 0.45 * harmonic + 0.4 * rhythm + 0.15 * parts.tonal : harmonic) - (static_ && !groove ? 0.5 : 0); src.작 = 'm';
+  ax.편 = 1.5 + 2.5 * (0.28 * parts.dynamics + 0.17 * parts.crest + 0.2 * parts.balance + 0.15 * parts.width + 0.2 * parts.variation); src.편 = 'm';
+  ax.통 = 1.8 + 2.2 * parts.arc; src.통 = 'm';
+  ax.유 = 1.5 + 2.5 * parts.moment; src.유 = 'm';
   const ly = ex.lyrics;
   if (ly && ly.instrumental) { src.가 = 'inst'; }
-  else if (ly && ly.lines) { parts.ly = 0.4 * band(ly.uniq, 0.4, 0.95, 0.3) + 0.4 * band(ly.mattr, 0.5, 0.92, 0.25) + 0.2 * (1 - clamp((ly.top - 0.15) / 0.3)); ax.가 = 2.0 + 1.5 * parts.ly; src.가 = 'm'; }
+  else if (ly && ly.lines) { parts.ly = 0.4 * band(ly.uniq, 0.45, 0.95, 0.3) + 0.4 * band(ly.mattr, 0.55, 0.92, 0.3) + 0.2 * (1 - clamp((ly.top - 0.15) / 0.3)); ax.가 = 1.2 + 2.8 * parts.ly; src.가 = 'm'; }
   if (ex.cover && ex.mood) {
     const wantL = 0.25 + 0.5 * ex.mood.valence, wantS = 0.15 + 0.6 * ex.mood.energy;
     parts.coh = clamp(1 - (Math.abs(ex.cover.light - wantL) + Math.abs(ex.cover.sat - wantS)) / 0.8);
-    ax.미 = 2.5 + 0.8 * parts.coh; src.미 = 'm';
+    ax.미 = 2.2 + 1.4 * parts.coh; src.미 = 'm';
   }
-  for (const k of Object.keys(ax)) ax[k] = +Math.min(3.5, ax[k]).toFixed(2);
+  for (const k of Object.keys(ax)) ax[k] = +clamp(ax[k], 0.5, 4).toFixed(2);
   return { axes: ax, parts, src };
 }
 /* 외부 근거 점수(0~100): 곡 자체 평점 → 없으면 수록 앨범 평점(가중 낮춤) + 평단 결산·수상 기록.
    위아래 같은 방식으로 반영(평단이 낮으면 내려감). 근거가 없으면 null */
-export function evidenceScore(songCr, albumCr) {
+/* 외부 근거 점수 v5(0~100) — '초월 평론가' 기준: 평단 평점(곡 > 앨범), 정전 목록·평단상, 평단 결산 리스트.
+   평단 평점이 낮으면 그만큼 내려가고, 정전 근거는 강하게 올린다. 인기·판매·차트는 넣지 않는다 */
+export function evidenceScore(songCr, albumCr, artistCr) {
   const avg = (c) => { const r = (c?.ratings || []).filter((x) => !x.aggregate); const agg = (c?.ratings || []).find((x) => x.aggregate && x.source === 'Metacritic');
     if (agg && r.length >= 1) return { v: (agg.n + r.reduce((a, x) => a + x.n, 0) / r.length) / 2, n: r.length + 1 };
     return r.length >= 2 ? { v: r.reduce((a, x) => a + x.n, 0) / r.length, n: r.length } : agg ? { v: agg.n, n: 1 } : null; };
   const s = avg(songCr), al = avg(albumCr);
+  const canon = [...(songCr?.canon || []).map((c) => ({ ...c, w: 1 })), ...(albumCr?.canon || []).map((c) => ({ ...c, w: 0.6 })), ...(artistCr?.canon || []).map((c) => ({ ...c, w: 0.35 }))];
+  const seen = new Set(); let canonPts = 0; const canonNames = [];
+  for (const c of canon.sort((x, y) => y.pts * y.w - x.pts * x.w)) { if (seen.has(c.name)) continue; seen.add(c.name); canonPts += c.pts * c.w; canonNames.push(c.name + (c.w < 1 ? (c.w === 0.6 ? '(앨범)' : '(아티스트)') : '')); }
   const lists = songCr?.acc?.lists || 0;
-  let base = null, strong = false; const why = [];
-  if (s) { base = s.v; strong = s.n >= 3; why.push(`곡 평점 ${s.n}곳 평균 ${Math.round(s.v)}`); }
-  else if (al) { base = 50 + (al.v - 50) * 0.75; strong = al.n >= 5; why.push(`수록 앨범 평점 ${al.n}곳 평균 ${Math.round(al.v)}(곡에는 75%만 반영)`); }
-  if (base == null && lists >= 5) { base = 60 + Math.min(15, lists); why.push('평점 표는 없지만 평단 결산 리스트에 다수 선정'); }
+  let base = null, n = 0; const why = [];
+  if (s) { base = s.v; n = s.n; why.push(`곡 평점 ${s.n}곳 평균 ${Math.round(s.v)}`); }
+  else if (al) { base = 50 + (al.v - 50) * 0.85; n = al.n; why.push(`수록 앨범 평점 ${al.n}곳 평균 ${Math.round(al.v)}`); }
+  if (base == null && (canonPts >= 5 || lists >= 5)) { base = 66; why.push('평점 표는 없지만 정전·결산 근거 있음'); }
   if (base == null) return null;
-  const bonus = Math.min(10, lists * 0.5);
-  if (lists) why.push(`평단 결산 리스트 ${lists}회 선정`);
-  return { score: Math.round(clamp(base + bonus, 0, 100)), strong, why };
+  const bonus = Math.min(24, canonPts) + Math.min(8, lists * 0.6);
+  if (canonNames.length) why.push(`정전·평단상: ${canonNames.slice(0, 4).join(', ')}`);
+  if (lists) why.push(`평단 결산 리스트 ${lists}회`);
+  const score = Math.round(clamp(base + bonus * (base >= 60 ? 1 : 0.5), 0, 100));
+  return { score, strong: n >= 3 || canonPts >= 12, why };
 }
-// 근거 반영: 작·편·혁·유·통을 측정값과 근거 목표치의 평균으로, 상한 5점으로 해제. 근거 없으면 상한 3.5
+// 근거 반영 v5: 근거 목표치(평점 90 → 5점, 70 → 4.2점, 50 → 3.3점, 30 → 2.4점)와 측정값을 근거 강도만큼 섞는다. 근거 없으면 상한 3.8
 export function applyEvidence(axes, src, ev) {
   const a = { ...axes }, sr = { ...src };
-  if (!ev) { for (const k of Object.keys(a)) if (a[k] > 3.5) a[k] = 3.5; return { axes: a, src: sr }; }
-  const target = clamp(1 + ev.score / 25, 1, 5);
-  const w = ev.strong ? 0.7 : 0.5;
-  for (const k of ['작', '편', '유', '통', '연']) { const m = a[k] ?? DEFAULT_UNMEASURED; a[k] = +clamp((1 - w) * m + w * target, 0, 5).toFixed(2); sr[k] = a[k] != null && src[k] === 'm' ? 'mc' : 'c'; }
-  if (a.가 != null) { a.가 = +clamp(0.65 * a.가 + 0.35 * target, 0, 5).toFixed(2); sr.가 = 'mc'; }
+  if (!ev) { for (const k of Object.keys(a)) if (a[k] > 3.8) a[k] = 3.8; return { axes: a, src: sr }; }
+  const target = clamp(1 + ev.score / 22.5, 1, 5);
+  const w = ev.strong ? 0.75 : 0.55;
+  for (const k of ['작', '편', '유', '통', '연']) { const m = a[k] ?? DEFAULT_UNMEASURED; a[k] = +clamp((1 - w) * m + w * target, 0, 5).toFixed(2); sr[k] = src[k] === 'm' ? 'mc' : 'c'; }
+  if (a.가 != null) { a.가 = +clamp(0.6 * a.가 + 0.4 * target, 0, 5).toFixed(2); sr.가 = 'mc'; }
   a.혁 = +target.toFixed(2); sr.혁 = 'c';
+  if (a.미 != null) a.미 = +clamp(0.7 * a.미 + 0.3 * target, 0, 5).toFixed(2);
   return { axes: a, src: sr };
 }
 
@@ -1244,6 +1256,33 @@ function accolades(wt) {
   }
   return { lists, wins, noms };
 }
+/* 정전(canon)·전문가 평가 근거: 영문·한국어 위키백과 본문에서 탐지. 인기·판매·차트가 아니라 평단·학술·기관이 고른 목록만 */
+const CANON = [
+  [/Rolling Stone(?:'s)?[^.\n]{0,40}500 Greatest Songs/i, '롤링스톤 역대 500대 명곡', 14],
+  [/Rolling Stone(?:'s)?[^.\n]{0,40}500 Greatest Albums/i, '롤링스톤 역대 500대 명반', 14],
+  [/National Recording Registry/i, '미국 의회도서관 국가녹음등록부', 12],
+  [/Grammy Hall of Fame/i, '그래미 명예의 전당', 8],
+  [/Rock and Roll Hall of Fame(?:'s)? 500 Songs/i, '로큰롤 명예의 전당 500곡', 8],
+  [/1001 Albums You Must Hear/i, '죽기 전에 꼭 들어야 할 앨범 1001', 8],
+  [/1001 Songs You Must Hear/i, '죽기 전에 꼭 들어야 할 노래 1001', 6],
+  [/Acclaimed Music/i, 'Acclaimed Music 평단 종합 순위', 6],
+  [/Pitchfork[^.\n]{0,60}(?:best|greatest|top)[^.\n]{0,30}(?:songs|tracks|albums)/i, '피치포크 결산·올타임 리스트', 6],
+  [/(?:NME|The Guardian|Time|Billboard|Paste|Stereogum|Consequence|Slant|Spin|Uproxx)[^.\n]{0,50}(?:best|greatest)[^.\n]{0,20}(?:songs|albums) of (?:the (?:year|decade|20\d\ds|19\d\ds|century)|all time|20\d\d)/i, '주요 매체 연말·연대 결산', 5],
+  [/Korean Music Awards?[^.\n]{0,80}\b(?:won|winner|received)\b|\b(?:won|winner|received)\b[^.\n]{0,80}Korean Music Awards?/i, '한국대중음악상 수상', 10],
+  [/Korean Music Awards?[^.\n]{0,60}nominat|nominat[^.\n]{0,60}Korean Music Awards?/i, '한국대중음악상 후보', 5],
+  [/한국대중음악상[^.\n]{0,40}(?:수상|선정|받)/, '한국대중음악상 수상', 10],
+  [/한국대중음악상[^.\n]{0,40}후보/, '한국대중음악상 후보', 5],
+  [/(?:한국|대중음악)[^.\n]{0,20}100대 명반/, '한국 대중음악 100대 명반', 14],
+  [/100대 명곡/, '한국 대중음악 100대 명곡', 10],
+  [/Polaris Music Prize|Mercury Prize|Pulitzer Prize for Music/i, '머큐리·폴라리스·퓰리처 등 평단상', 10],
+];
+export function canonHits(...texts) {
+  const t = texts.filter(Boolean).join('\n'); const out = []; const seen = new Set();
+  for (const [re, name, pts] of CANON) if (!seen.has(name) && re.test(t)) { seen.add(name); out.push({ name, pts }); }
+  // 수상과 후보가 둘 다 잡히면 수상만 남김
+  if (seen.has('한국대중음악상 수상')) return out.filter((x) => x.name !== '한국대중음악상 후보');
+  return out;
+}
 function receptionPara(wt) {
   const sec = wt.split(/\n==+\s*(Critical reception|Reception|Critical response)\s*==+\n/i)[2];
   if (!sec) return '';
@@ -1260,8 +1299,8 @@ export function criticInfo(it) {
   const title = raw.replace(/\s*[([].*?[)\]]\s*/g, ' ').trim() || (it.title || '');
   const artist = primaryArtist(it.artist || '');
   const kindWord = it.kind === 'album' ? 'album' : 'song';
-  return cached(`cr:${it.kind}:${lite(title)}:${lite(artist)}`, 36e5, async () => {
-    const saved = lsGet('ctl:cr:' + lite(title + artist + kindWord)); if (saved && Date.now() - saved.t < 7 * 864e5) return saved.v;
+  return cached(`cr2:${it.kind}:${lite(title)}:${lite(artist)}`, 36e5, async () => {
+    const saved = lsGet('ctl:cr2:' + lite(title + artist + kindWord)); if (saved && Date.now() - saved.t < 7 * 864e5) return saved.v;
     const pick = (list) => (list || []).find((r) => { const pt = lite(r.title), sn = lite((r.snippet || '').replace(/<[^>]+>/g, '')); return pt.startsWith(lite(title)) && (sn.includes(lite(artist)) || pt.includes(lite(artist)) || sn.includes(kindWord)); });
     let lang = 'en', hit = null;
     const en = await wiki('en', `action=query&list=search&srsearch=${enc(`${title} ${artist} ${kindWord}`)}&srlimit=6`).catch(() => null);
@@ -1275,7 +1314,9 @@ export function criticInfo(it) {
       const sum = async (l, t) => { try { const r = await fetch(`https://${l}.wikipedia.org/api/rest_v1/page/summary/${enc(t.replace(/ /g, '_'))}`, { headers: WIKI_H }); return r.ok ? (await r.json()).extract || '' : ''; } catch { return ''; } };
       const ratings = parseRatings(wt);
       const crit = ratings.filter((r) => !r.aggregate);
+      const koWt = koTitle && lang === 'en' ? ((await wiki('ko', `action=parse&page=${enc(koTitle)}&prop=wikitext&redirects=1`).catch(() => null))?.parse?.wikitext || '') : (lang === 'ko' ? wt : '');
       v = {
+        canon: canonHits(lang === 'en' ? wt : '', koWt),
         found: true, title: hit.title, url: `https://${lang}.wikipedia.org/wiki/${enc(hit.title.replace(/ /g, '_'))}`,
         koUrl: koTitle ? `https://ko.wikipedia.org/wiki/${enc(koTitle.replace(/ /g, '_'))}` : '',
         summaryKo: koTitle ? await sum('ko', koTitle) : '', summaryEn: lang === 'en' ? await sum('en', hit.title) : '',
@@ -1284,7 +1325,28 @@ export function criticInfo(it) {
         acc: accolades(wt),
       };
     }
-    lsSet('ctl:cr:' + lite(title + artist + kindWord), { t: Date.now(), v });
+    lsSet('ctl:cr2:' + lite(title + artist + kindWord), { t: Date.now(), v });
+    return v;
+  });
+}
+
+/* 아티스트 문서의 정전·전문가 근거(한국대중음악상, 100대 명반, 명예의 전당 등) */
+export function artistCritic(name) {
+  return cached(`acr:${lite(name)}`, 36e5, async () => {
+    const saved = lsGet('ctl:acr:' + lite(name)); if (saved && Date.now() - saved.t < 7 * 864e5) return saved.v;
+    let v = { found: false, canon: [] };
+    try {
+      const pick = (list) => (list || []).find((r) => lite(r.title).startsWith(lite(name)) || lite(r.title).includes(lite(name)));
+      const en = await wiki('en', `action=query&list=search&srsearch=${enc(`${name} band OR singer OR musician`)}&srlimit=5`).catch(() => null);
+      const ko = await wiki('ko', `action=query&list=search&srsearch=${enc(`${name} 가수 OR 밴드`)}&srlimit=5`).catch(() => null);
+      const he = pick(en?.query?.search), hk = pick(ko?.query?.search);
+      const [pe, pk] = await Promise.all([he ? wiki('en', `action=parse&page=${enc(he.title)}&prop=wikitext&redirects=1`).catch(() => null) : null, hk ? wiki('ko', `action=parse&page=${enc(hk.title)}&prop=wikitext&redirects=1`).catch(() => null) : null]);
+      const wt = pe?.parse?.wikitext || '', kt = pk?.parse?.wikitext || '';
+      const canon = canonHits(wt, kt).concat(/Rock and Roll Hall of Fame[^.\n]{0,40}induct/i.test(wt) ? [{ name: '로큰롤 명예의 전당 헌액', pts: 10 }] : [])
+        .concat(/Rolling Stone(?:'s)?[^.\n]{0,40}(?:100|200) Greatest (?:Artists|Singers)/i.test(wt) ? [{ name: '롤링스톤 역대 위대한 아티스트·가수', pts: 10 }] : []);
+      v = { found: !!(he || hk), canon, url: he ? `https://en.wikipedia.org/wiki/${enc(he.title.replace(/ /g, '_'))}` : hk ? `https://ko.wikipedia.org/wiki/${enc(hk.title.replace(/ /g, '_'))}` : '' };
+    } catch { /* 무시 */ }
+    lsSet('ctl:acr:' + lite(name), { t: Date.now(), v });
     return v;
   });
 }
