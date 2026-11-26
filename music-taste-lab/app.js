@@ -413,8 +413,8 @@ function moodBlock(an) {
     <div class="mood-tex">${m.texture.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
     <div class="metrics">
       ${metric('템포', `${Math.round(f.bpm)} <small class="mut">BPM</small>`, bpmNote)}
-      ${metric('조성', `${esc(f.keyName)} <small class="mut">${esc(f.camelot)}</small>`, `조성 확신도 ${f.keyR.toFixed(2)} (1에 가까울수록 뚜렷)`)}
-      ${metric('에너지', `${Math.round(m.energy * 100)}`, `평균 음량 ${f.rmsDb} dBFS`, m.energy)}
+      ${metric('조성', `${esc(f.keyName)} <small class="mut">${esc(f.camelot)}</small>`, Math.abs(f.modeMargin) < 0.1 ? `장조·단조 구분이 불확실함 (확신도 ${f.keyR.toFixed(2)})` : `조성 확신도 ${f.keyR.toFixed(2)} (1에 가까울수록 뚜렷)`)}
+      ${metric('에너지', `${Math.round(m.energy * 100)}`, '박동 선명도·타악기·잡음 성분으로 측정', m.energy)}
       ${metric('밝기', `${Math.round(E.clamp((f.centroid - 900) / 2600) * 100)}`, `소리 무게중심 ${f.centroid.toLocaleString()} Hz`, (f.centroid - 900) / 2600)}
       ${metric('다이내믹 레인지', `${f.dr} <small class="mut">dB</small>`, drNote, f.dr / 16)}
       ${metric('공간감(스테레오 폭)', `${Math.round(E.clamp(f.width / 0.6) * 100)}`, f.width < 0.03 ? '거의 모노' : f.width > 0.35 ? '넓게 퍼짐' : '보통', f.width / 0.6)}

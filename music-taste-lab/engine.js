@@ -559,7 +559,10 @@ export function fixTempo(f, ref) {
   if (!f) return f;
   const c = [f.bpm, f.bpm / 2, f.bpm * 2];
   let bpm = f.bpm;
-  if (ref > 0) bpm = c.reduce((a, b) => (Math.abs(Math.log2(b / ref)) < Math.abs(Math.log2(a / ref)) ? b : a));
+  if (ref > 0) {
+    bpm = c.reduce((a, b) => (Math.abs(Math.log2(b / ref)) < Math.abs(Math.log2(a / ref)) ? b : a));
+    if (Math.abs(Math.log2(bpm / ref)) > 0.11) bpm = ref; // 배수 관계가 아니면(셋잇단 등) Deezer 값을 채택
+  }
   else if (f.bpm > 135 && f.onsetRate < 3) bpm = f.bpm / 2;
   if (bpm !== f.bpm) { f.bpmRaw = f.bpm; f.bpm = +bpm.toFixed(1); }
   return f;
@@ -579,18 +582,21 @@ export async function analyzeAudio(url) {
 
 /* ───────────── 느낌(무드) ───────────── */
 export function moodOf(f, genres) {
-  const energy = clamp((f.rmsDb + 30) / 20);
+  // 미리듣기는 음량이 평준화돼 있어(발라드·EDM 모두 약 -14 dBFS) 음량 대신 박동·타악기·잡음 성분으로 에너지를 잰다
+  // 실측 보정: 발라드 박동 0.12~0.16, 댄스 0.67~0.91 / 고역 비중 발라드 ~0.01, 댄스 0.04~0.09
+  const pulseN = clamp((f.pulse - 0.1) / 0.6), perc = clamp((f.high - 0.008) / 0.06), flatN = clamp((f.flatness - 0.18) / 0.3);
   const tempo = clamp((f.bpm - 65) / 105);
-  const arousal = clamp(0.5 * energy + 0.25 * tempo + 0.25 * clamp(f.onsetRate / 5));
+  const energy = clamp(0.55 * pulseN + 0.25 * perc + 0.2 * flatN);
+  const arousal = clamp(0.45 * pulseN + 0.2 * perc + 0.15 * flatN + 0.2 * tempo);
   const major = 1 / (1 + Math.exp(-f.modeMargin * 9));
   const bright = clamp((f.centroid - 900) / 2600);
-  const valence = clamp(0.5 * major + 0.3 * bright + 0.2 * tempo);
+  const valence = clamp(0.4 * major + 0.4 * bright + 0.2 * tempo);
   const acousticAudio = clamp(0.55 * (1 - clamp((f.flatness - 0.08) / 0.3)) + 0.25 * (1 - clamp(f.pulse / 0.6)) + 0.2 * (1 - clamp(f.high / 0.12)));
   const gx = genreAxis(genres);
   const x = clamp(gx == null ? 1 - 2 * acousticAudio : 0.65 * gx + 0.35 * (1 - 2 * acousticAudio), -1, 1);
-  const y = clamp(2 * valence - 1, -1, 1);
+  const y = clamp(((valence - 0.45) / 0.35) * 0.7 + (arousal - 0.4) * 1.2, -1, 1); // 정서축: 밝기·조성 + 에너지(잔잔할수록 서정 쪽)
   const words = [];
-  if (arousal > 0.62) words.push(...(valence > 0.55 ? (bright > 0.55 ? ['신나는', '청량한'] : ['신나는', '당당한']) : ['강렬한', '긴장감 있는']));
+  if (arousal > 0.62) words.push(...(valence > 0.45 ? (bright > 0.55 ? ['신나는', '청량한'] : ['신나는', '당당한']) : ['강렬한', '긴장감 있는']));
   else if (arousal < 0.4) words.push(...(valence > 0.55 ? ['포근한', '여유로운'] : (f.width > 0.25 ? ['몽환적인', '아련한'] : ['쓸쓸한', '아련한'])));
   else words.push(valence > 0.55 ? '산뜻한' : valence < 0.4 ? '차분하게 가라앉은' : '담백한');
   const tex = [];
