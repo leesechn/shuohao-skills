@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>청음실</title>
+<meta name="description" content="곡·앨범·아티스트를 검색해 담으면 세부장르, 작곡가, 곡의 느낌, 엄격한 점수와 내 음악 취향을 분석해 줍니다.">
+<meta name="theme-color" content="#000000">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#search" aria-label="청음실 처음으로">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="brand-name">청음실</span>
+    </a>
+    <nav class="nav" aria-label="주요 화면">
+      <a href="#search" data-nav="search" class="nav-btn">검색</a>
+      <a href="#taste" data-nav="taste" class="nav-btn">내 취향 <span class="count" id="libCount">0</span></a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section id="view-search" class="view">
+    <div class="search-wrap">
+      <form class="searchbox" id="searchForm" role="search" autocomplete="off">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+        <input id="q" type="search" placeholder="곡, 앨범, 아티스트 검색" aria-label="곡, 앨범, 아티스트 검색" enterkeyhint="search" spellcheck="false">
+        <button type="button" id="clearQ" class="clear" aria-label="검색어 지우기" hidden>×</button>
+      </form>
+      <div class="tabs" role="tablist" id="tabs">
+        <button role="tab" data-tab="all" aria-selected="true">전체</button>
+        <button role="tab" data-tab="track" aria-selected="false">곡</button>
+        <button role="tab" data-tab="album" aria-selected="false">앨범</button>
+        <button role="tab" data-tab="artist" aria-selected="false">아티스트</button>
+      </div>
+    </div>
+    <div id="results" class="results" aria-live="polite"></div>
+  </section>
+
+  <section id="view-taste" class="view" hidden>
+    <div id="taste"></div>
+  </section>
+</main>
+
+<div id="sheetBack" class="sheet-back" hidden></div>
+<aside id="sheet" class="sheet" hidden aria-modal="true" role="dialog" aria-label="분석">
+  <div class="sheet-bar">
+    <button class="icon-btn" id="sheetPrev" hidden aria-label="이전">‹</button>
+    <span class="sheet-title" id="sheetTitle">분석</span>
+    <button class="icon-btn" id="sheetClose" aria-label="닫기">×</button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</aside>
+
+<div class="player" id="playerBar" hidden>
+  <img id="pArt" alt="">
+  <div class="p-meta"><b id="pTitle"></b><span id="pArtist"></span></div>
+  <button class="icon-btn" id="pToggle" aria-label="일시정지">❚❚</button>
+  <div class="p-prog"><i id="pProg"></i></div>
+</div>
+<audio id="audio" preload="none"></audio>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
