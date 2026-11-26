@@ -4,70 +4,184 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>청음실</title>
-<meta name="description" content="곡·앨범·아티스트를 검색해 담으면 세부장르, 작곡가, 곡의 느낌, 엄격한 점수와 내 음악 취향을 분석해 줍니다.">
-<meta name="theme-color" content="#000000">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%23000%22/%3E%3Crect x=%223%22 y=%227%22 width=%222%22 height=%226%22 fill=%22%23f2b64c%22/%3E%3Crect x=%227%22 y=%223%22 width=%222%22 height=%2210%22 fill=%22%23f2b64c%22/%3E%3Crect x=%2211%22 y=%229%22 width=%222%22 height=%224%22 fill=%22%23ff6b3d%22/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<meta name="description" content="곡·앨범·아티스트를 검색해 담으면 세부장르, 작곡가, 곡의 느낌, 엄격한 8축 점수와 내 음악 취향 공식을 분석해 줍니다.">
+<meta name="theme-color" content="#0B0D10">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%224%22 fill=%22%233B82F6%22/%3E%3Crect x=%223.5%22 y=%227%22 width=%222%22 height=%225.5%22 fill=%22%23fff%22/%3E%3Crect x=%227%22 y=%223.5%22 width=%222%22 height=%229%22 fill=%22%23fff%22/%3E%3Crect x=%2210.5%22 y=%228.5%22 width=%222%22 height=%224%22 fill=%22%23fff%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="top">
-  <div class="top-in">
-    <a class="brand" href="#search" aria-label="청음실 처음으로">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-      <span class="brand-name">청음실</span>
+<header class="app-header">
+  <div class="header-inner">
+    <a class="brand" href="#" data-act="tab" data-tab="analyze" aria-label="청음실 처음 화면">
+      <span class="brand-badge" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><span class="brand-title">청음실</span><span class="brand-sub">음악 취향 분석 · 엄격 8축 채점</span></span>
     </a>
-    <nav class="nav" aria-label="주요 화면">
-      <a href="#search" data-nav="search" class="nav-btn">검색</a>
-      <a href="#taste" data-nav="taste" class="nav-btn">내 취향 <span class="count" id="libCount">0</span></a>
-    </nav>
+    <div class="header-actions">
+      <nav class="segmented-nav" aria-label="화면 전환">
+        <button type="button" class="nav-btn active" data-act="tab" data-tab="analyze">1. 취향 분석</button>
+        <button type="button" class="nav-btn" data-act="tab" data-tab="rubric">2. 곡 8축 채점</button>
+      </nav>
+      <button type="button" class="theme-btn" id="themeBtn" aria-label="밝은 화면으로 전환">라이트</button>
+    </div>
   </div>
 </header>
 
-<main>
-  <section id="view-search" class="view">
-    <div class="search-wrap">
-      <form class="searchbox" id="searchForm" role="search" autocomplete="off">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
-        <input id="q" type="search" placeholder="곡, 앨범, 아티스트 검색" aria-label="곡, 앨범, 아티스트 검색" enterkeyhint="search" spellcheck="false">
-        <button type="button" id="clearQ" class="clear" aria-label="검색어 지우기" hidden>×</button>
-      </form>
-      <div class="tabs" role="tablist" id="tabs">
-        <button role="tab" data-tab="all" aria-selected="true">전체</button>
-        <button role="tab" data-tab="track" aria-selected="false">곡</button>
-        <button role="tab" data-tab="album" aria-selected="false">앨범</button>
-        <button role="tab" data-tab="artist" aria-selected="false">아티스트</button>
+<main class="container">
+  <!-- 1. 취향 분석 -->
+  <section id="viewAnalyze">
+    <div class="workspace-grid">
+      <!-- 왼쪽: 검색 -->
+      <div class="card" id="searchCard">
+        <div class="card-header">
+          <div>
+            <h1 class="card-title">곡 · 아티스트 · 앨범 통합 검색</h1>
+            <p class="card-desc">Apple Music(한국·미국·일본) · Deezer · MusicBrainz를 한 번에 찾습니다</p>
+          </div>
+        </div>
+        <form class="search-box" id="searchForm" role="search" autocomplete="off">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+          <input id="q" type="search" class="search-input" placeholder="가수, 곡명, 앨범 (예: 아이유 밤편지, 뉴진스 디토, Radiohead)" aria-label="검색어" enterkeyhint="search" spellcheck="false">
+          <button type="button" class="btn-ghost" id="clearQ" aria-label="검색어 지우기" hidden>✕</button>
+          <button type="submit" class="btn-primary">검색</button>
+        </form>
+        <div class="filter-row">
+          <div class="pill-group" role="tablist" id="filters">
+            <button type="button" class="pill active" data-act="filter" data-f="all">전체</button>
+            <button type="button" class="pill" data-act="filter" data-f="track">곡</button>
+            <button type="button" class="pill" data-act="filter" data-f="artist">아티스트</button>
+            <button type="button" class="pill" data-act="filter" data-f="album">앨범</button>
+          </div>
+          <span class="status" id="status">KR · US · JP 카탈로그</span>
+        </div>
+        <div class="preset-bar">
+          <span class="preset-label">빠른 체험 샘플</span>
+          <button type="button" class="btn-secondary" data-act="preset" data-p="garage">몽환 개러지·R&amp;B</button>
+          <button type="button" class="btn-secondary" data-act="preset" data-p="band">청춘 인디·J-pop</button>
+          <button type="button" class="btn-secondary" data-act="preset" data-p="glam">글램 일렉트로팝</button>
+        </div>
+        <div id="results" class="results-area" aria-live="polite"></div>
+      </div>
+
+      <!-- 오른쪽: 취향 바구니 -->
+      <div class="card sticky-col" id="basketCard">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">내 취향 바구니 <span class="badge" id="basketCount">0개</span></h2>
+            <p class="card-desc">개수 제한 없음 · 많이 담을수록 취향 공식이 정교해집니다</p>
+          </div>
+          <div class="row-gap">
+            <button type="button" class="btn-secondary" data-act="bulkOpen">+ 여러 곡 붙여넣기</button>
+          </div>
+        </div>
+        <div class="basket-toolbar">
+          <input id="basketFilter" type="search" class="basket-search" placeholder="바구니 안에서 찾기" aria-label="바구니 안에서 찾기">
+          <div class="pill-group" id="basketTypes">
+            <button type="button" class="pill active" data-act="btype" data-t="all">전체</button>
+            <button type="button" class="pill" data-act="btype" data-t="track">곡</button>
+            <button type="button" class="pill" data-act="btype" data-t="artist">가수</button>
+            <button type="button" class="pill" data-act="btype" data-t="album">앨범</button>
+          </div>
+        </div>
+        <div id="basketList" class="basket-list"></div>
+        <div class="basket-foot">
+          <span class="muted" id="queueText">브라우저에 자동 저장됨</span>
+          <div class="row-gap">
+            <button type="button" class="btn-ghost" data-act="export">백업 내려받기</button>
+            <label class="btn-ghost">불러오기<input type="file" accept=".json,application/json" data-act="import" hidden></label>
+            <button type="button" class="btn-ghost danger" data-act="clearAsk">전체 비우기</button>
+            <button type="button" class="btn-ghost danger" data-act="clearYes" hidden>정말 비우기</button>
+          </div>
+        </div>
+        <div class="anti-box">
+          <div class="anti-title">피하고 싶은 요소 <span class="muted">(감점 필터 · 선택)</span></div>
+          <div class="pill-group" id="antiTags"></div>
+        </div>
+        <button type="button" class="btn-primary analyze-cta" data-act="analyze" id="analyzeBtn">내 음악 취향 정밀 분석 실행하기</button>
       </div>
     </div>
-    <div id="results" class="results" aria-live="polite"></div>
+    <div id="report" class="report-wrap" hidden></div>
   </section>
 
-  <section id="view-taste" class="view" hidden>
-    <div id="taste"></div>
+  <!-- 2. 곡 8축 채점 -->
+  <section id="viewRubric" hidden>
+    <div class="rubric-layout">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">엄격 8축 음악성 채점기 (100점)</h2>
+            <p class="card-desc">인기·차트·판매량 제외 · 3점 = 결함 없는 평작 기준선 · 근거 등급별 상한 자동 적용</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div><label class="field-label" for="rTitle">곡명 *</label><input id="rTitle" class="field-input" placeholder="예: Ditto / 밤편지"></div>
+          <div><label class="field-label" for="rArtist">아티스트 *</label><input id="rArtist" class="field-input" placeholder="예: NewJeans / 아이유"></div>
+          <div><label class="field-label" for="rGenre">장르 · 시대</label><input id="rGenre" class="field-input" placeholder="측정하면 자동으로 채워집니다"></div>
+          <div><label class="field-label" for="rEvidence">근거 수준 (상한 규칙)</label>
+            <select id="rEvidence" class="field-select">
+              <option value="A">A — 평론가 투표·학술·한국대중음악상 등 (상한 없음)</option>
+              <option value="B">B — 혼합 투표·명예의 전당 (5점은 사운드 확인 시만)</option>
+              <option value="C" selected>C — 차트·일반 소개뿐 (모든 항목 최대 4점, 총점 80 이하)</option>
+              <option value="J">J — 텍스트 추정·사운드 미확인 (모든 항목 최대 4점, 총점 80 이하)</option>
+            </select></div>
+        </div>
+        <div class="rubric-tools">
+          <label class="check"><input id="rInst" type="checkbox"> 연주곡 — 가사 항목 제외 후 100점 재정규화</label>
+          <button type="button" class="btn-secondary" data-act="measure" id="measureBtn">곡 찾아서 음향 측정하기</button>
+        </div>
+        <p class="muted small" id="measureNote">‘곡 찾아서 음향 측정하기’를 누르면 30초 미리듣기를 분석해 작곡(화성)·편곡 항목을 측정값으로 채웁니다. 나머지 항목은 직접 들어 보고 고르세요.</p>
+        <div class="table-wrap"><table class="axis-table"><thead><tr><th>항목</th><th>가중치</th><th>점수</th><th>기준</th></tr></thead><tbody id="rAxes"></tbody></table></div>
+        <div style="margin-top:12px"><label class="field-label" for="rNotes">구체적 근거와 감점 요인 메모</label>
+          <textarea id="rNotes" rows="3" class="field-textarea" placeholder="형용사(압도적, 명곡) 대신 구체적으로. 예: 2-step 킥과 절제된 베이스가 후렴 긴장을 유지하나 브릿지 화성 전환이 단조로워 감점."></textarea></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div><h2 class="card-title">채점 결과</h2><p class="card-desc">근거 상한과 내 취향 공식(분석 후) 반영</p></div></div>
+        <div id="rResult"></div>
+      </div>
+    </div>
   </section>
 </main>
 
-<div id="sheetBack" class="sheet-back" hidden></div>
-<aside id="sheet" class="sheet" hidden aria-modal="true" role="dialog" aria-label="분석">
-  <div class="sheet-bar">
-    <button class="icon-btn" id="sheetPrev" hidden aria-label="이전">‹</button>
-    <span class="sheet-title" id="sheetTitle">분석</span>
-    <button class="icon-btn" id="sheetClose" aria-label="닫기">×</button>
+<!-- 상세(아티스트·앨범·곡 분석) -->
+<div id="modal" class="modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="modal-panel">
+    <div class="modal-head">
+      <button type="button" class="btn-ghost" data-act="mBack" id="mBack" hidden aria-label="이전">‹ 이전</button>
+      <div class="m-head-main">
+        <img id="mThumb" alt="">
+        <div style="min-width:0"><span class="badge" id="mBadge">아티스트</span><h3 id="mTitle"></h3><p id="mSub" class="muted small"></p></div>
+      </div>
+      <div class="row-gap">
+        <button type="button" class="btn-primary" data-act="mAdd" id="mAdd">+ 담기</button>
+        <button type="button" class="btn-secondary" data-act="mClose">닫기 ✕</button>
+      </div>
+    </div>
+    <div class="modal-body" id="mBody"></div>
   </div>
-  <div class="sheet-body" id="sheetBody"></div>
-</aside>
-
-<div class="player" id="playerBar" hidden>
-  <img id="pArt" alt="">
-  <div class="p-meta"><b id="pTitle"></b><span id="pArtist"></span></div>
-  <button class="icon-btn" id="pToggle" aria-label="일시정지">❚❚</button>
-  <div class="p-prog"><i id="pProg"></i></div>
 </div>
-<audio id="audio" preload="none"></audio>
-<div id="toast" class="toast" role="status" hidden></div>
 
+<!-- 붙여넣기 -->
+<div id="bulk" class="modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="bulkTitle">
+  <div class="modal-panel narrow">
+    <div class="modal-head">
+      <div><h3 id="bulkTitle">여러 곡 한꺼번에 붙여넣기</h3><p class="muted small">한 줄에 한 곡씩 (예: 아이유 - 밤편지)</p></div>
+      <button type="button" class="btn-secondary" data-act="bulkClose">닫기 ✕</button>
+    </div>
+    <div class="modal-body">
+      <textarea id="bulkText" rows="9" class="field-textarea" placeholder="NewJeans - Ditto&#10;검정치마 - EVERYTHING&#10;藤井風 - 死ぬのがいいわ&#10;SZA - Snooze&#10;아이유 - 밤편지"></textarea>
+      <div class="bulk-foot"><span class="muted small" id="bulkMsg">줄마다 가장 정확한 곡을 찾아 담습니다.</span><button type="button" class="btn-primary" data-act="bulkRun" id="bulkRun">일괄 추가</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="player" class="player-bar" hidden>
+  <div class="player-inner">
+    <div class="p-meta"><img id="pArt" alt=""><div style="min-width:0"><div class="track-title" id="pTitle"></div><div class="track-sub" id="pArtist"></div></div></div>
+    <div class="p-ctrl"><button type="button" class="btn-primary small" id="pToggle">⏸ 정지</button><div class="progress-track"><div class="progress-fill" id="pFill"></div></div><span class="muted small" id="pTime">0:00</span></div>
+    <button type="button" class="btn-ghost" id="pClose" aria-label="플레이어 닫기">✕</button>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+<audio id="audio" preload="none"></audio>
 <script type="module" src="app.js"></script>
 </body>
 </html>
