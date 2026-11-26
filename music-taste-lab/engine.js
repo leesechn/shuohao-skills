@@ -147,7 +147,7 @@ export function itemKey(it) {
 
 // 정식 발매가 아닌 것(노래방·커버·속도 변형·자장가·컴필레이션 업로드 등)은 검색어가 그런 버전을 찾을 때만 보여 준다
 const UNOFFICIAL = /\b(karaoke|in the style of|originally performed|made famous|tribute|lullaby|music box|8[- ]?bit|sped up|slowed|nightcore|ringtone|cover version|piano cover|instrumental cover|reverb version)\b|노래방|가라오케|자장가|오르골|\bMR\b|커버|원곡가수|原曲歌手|カラオケ|オルゴール/i;
-const UNOFFICIAL_ARTIST = /(karaoke|tribute|lullaby|piano guy|music box|cover band|cover hits|sleep music|baby music|playground4music|歌っちゃ王)|__/i;
+const UNOFFICIAL_ARTIST = /(karaoke|tribute|lullaby|\bpiano\b|string quartet|music box|\bcovers?\b|sleep|relax|baby music|lofi girl|playground4music|歌っちゃ王|피아노 가이|자장가|오르골|태교)|__/i;
 export function isUnofficial(it, q = '') {
   if (UNOFFICIAL.test(q)) return false;
   if (UNOFFICIAL.test(it.title || '') || UNOFFICIAL.test(it.album || '')) return true;

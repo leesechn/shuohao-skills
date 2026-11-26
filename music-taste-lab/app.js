@@ -366,7 +366,7 @@ function renderModal() {
   $('#mTitle').textContent = it.title + (it.altTitle && it.altTitle !== it.title ? ` (${it.altTitle})` : '');
   const inf = detailCache.get(key)?.info;
   const TYPE = { Group: '그룹', Person: '솔로', Orchestra: '오케스트라', Choir: '합창단' };
-  $('#mSub').textContent = it.kind === 'artist' ? (inf ? [inf.country, inf.begin ? `${inf.begin.slice(0, 4)}년 활동 시작` : '', TYPE[inf.type] || '', inf.names?.length ? `다른 표기: ${inf.names.join(', ')}` : ''].filter(Boolean).join(' · ') : '인기곡 TOP 30 · 정식 발매작 · 아티스트 분석') : [it.artist, it.album !== it.title ? it.album : '', it.year].filter(Boolean).join(' · ');
+  $('#mSub').textContent = it.kind === 'artist' ? (inf ? [inf.country, inf.begin ? (inf.type === 'Person' ? `${inf.begin.slice(0, 4)}년생` : `${inf.begin.slice(0, 4)}년 결성`) : '', TYPE[inf.type] || '', inf.names?.length ? `다른 표기: ${inf.names.join(', ')}` : ''].filter(Boolean).join(' · ') : '인기곡 TOP 30 · 정식 발매작 · 아티스트 분석') : [it.artist, it.album !== it.title ? it.album : '', it.year].filter(Boolean).join(' · ');
   const on = !!entry(key);
   const add = $('#mAdd'); add.dataset.key = key; add.textContent = on ? '✓ 담김' : '+ 이 항목 담기'; add.classList.toggle('added', on);
   const top = mBody.scrollTop;
