@@ -29,7 +29,7 @@ const S = {
   lib: lsGet(LIB, null) || migrate(),
   manual: lsGet('ctl:manual', {}),
   anti: lsGet('ctl:anti', []),
-  items: new Map(), pending: new Map(), stack: [], critic: new Map(),
+  items: new Map(), pending: new Map(), stack: [], critic: new Map(), sim: new Map(),
   btype: 'all', bfilter: '', report: null, rubric: null,
 };
 function migrate() { const old = lsGet('ctl:lib:v1', null); return old ? { entries: old.entries || [], version: old.version || 0, prevTop: old.prevTop || [] } : { entries: [], version: 0, prevTop: [] }; }
@@ -88,15 +88,16 @@ function scoreOf(kind, an, key) {
   return r ? { ...r, provisional: kind === 'album' && man.axes?.미 == null } : null;
 }
 // 외부 근거: 곡 자체 위키 문서 + 수록 앨범 문서
+const ready = (c) => (c && !c.loading ? c : null);
 function evidenceOf(key) {
-  const sc = S.critic.get(key), ac = S.critic.get(key + '#al');
-  if ((!sc || sc.loading) && (!ac || ac.loading)) return null;
-  return E.evidenceScore(sc && !sc.loading ? sc : null, ac && !ac.loading ? ac : null);
+  const sc = ready(S.critic.get(key)), ac = ready(S.critic.get(key + '#al')), rc = ready(S.critic.get(key + '#ar'));
+  if (!sc && !ac && !rc) return null;
+  return E.evidenceScore(sc, ac, rc);
 }
 // 앨범 점수: 앨범 평점이 있으면 수록곡마다 같은 근거를 적용
 function withAlbumEvidence(kind, an, key) {
-  if (kind !== 'album') return an;
-  const cr = S.critic.get(key); const ev = cr && !cr.loading ? E.evidenceScore(cr, null) : null;
+  if (kind === 'track') return an;
+  const ev = kind === 'album' ? E.evidenceScore(ready(S.critic.get(key)), null, ready(S.critic.get(key + '#ar'))) : E.evidenceScore(null, null, ready(S.critic.get(key)), { artistWeight: 1 });
   if (!ev) return an;
   return { ...an, analyzed: (an.analyzed || []).map((t) => (t.failed ? t : { ...t, score: E.musicScore(E.applyEvidence(t.auto || {}, t.autoSrc || {}, ev).axes, t.inst) })) };
 }
@@ -198,7 +199,7 @@ function syncAdd() {
     else b.textContent = on ? '✓ 담김' : '+ 담기';
   });
 }
-function ensureCritic(e) { if (e.kind !== 'artist' && !S.critic.has(e.key)) { reg(e.item); loadCritic(S.items.get(e.key)); } }
+function ensureCritic(e) { if (!S.critic.has(e.key)) { reg(e.item); loadCritic(S.items.get(e.key)); } }
 function renderBasket() {
   const list = $('#basketList');
   $('#basketCount').textContent = `${S.lib.entries.length}개`;
@@ -343,11 +344,14 @@ function openModal(key) {
   const an = getAn(key);
   if (!an || an.failed) analyze(it); // 곡·앨범·아티스트 모두 열면 바로 분석
   if (it.kind !== 'track' && !detailCache.has(key)) loadDetail(it);
-  if (it.kind !== 'artist' && !S.critic.has(key)) loadCritic(it);
+  if (!S.critic.has(key)) loadCritic(it);
 }
 function loadCritic(it) {
   const key = it.key; S.critic.set(key, { loading: true });
   const done = () => { if (curKey() === key) renderModal(); renderBasket(); };
+  const artistName = (it.kind === 'artist' ? it.title : String(it.artist || '').split(/\s*(?:,|&|feat\.?)\s*/i)[0]).trim();
+  if (it.kind === 'artist') { E.artistCritic(artistName).then((v) => S.critic.set(key, v), () => S.critic.set(key, { found: false })).finally(done); return; }
+  if (artistName) { S.critic.set(key + '#ar', { loading: true }); E.artistCritic(artistName).then((v) => S.critic.set(key + '#ar', v), () => S.critic.set(key + '#ar', { found: false })).finally(done); }
   E.criticInfo(it).then((v) => S.critic.set(key, v), () => S.critic.set(key, { found: false, error: true })).finally(done);
   if (it.kind === 'track' && it.album && dedupeAlb(it.album) !== dedupeAlb(it.title)) {
     S.critic.set(key + '#al', { loading: true });
@@ -355,10 +359,20 @@ function loadCritic(it) {
   }
 }
 const dedupeAlb = (t) => E.dedupeKey(String(t || '').replace(/\s+-\s+(Single|EP)$/i, ''));
+function verdictOf(score) {
+  if (score >= 90) return '장르의 교본급입니다. 평단·정전 근거와 측정이 모두 최상위에서 일치합니다.';
+  if (score >= 80) return '뚜렷한 수작입니다. 외부 평가가 높고 측정상 큰 약점이 없습니다.';
+  if (score >= 70) return '탄탄한 완성도입니다. 강점이 분명하지만 교본급이라 할 근거는 부족합니다.';
+  if (score >= 60) return '평균적인 완성도입니다. 결함은 적지만 특출난 점을 뒷받침할 근거가 없습니다.';
+  if (score >= 50) return '관습적인 곡입니다. 반복·단순성 등 측정상 약점이 보이고 외부 근거도 없습니다.';
+  return '약점이 큽니다. 구조·가사·사운드 측정에서 뚜렷한 한계가 드러납니다.';
+}
 function reviewBlock(it, an) {
   const cr = S.critic.get(it.key);
   const paras = E.reviewText(it, an, cr && !cr.loading && !cr.error ? cr : null);
-  let h = `<div class="d-block"><h4>객관적 평론</h4><div class="review">${paras.map((p) => `<p>${esc(p)}</p>`).join('')}</div>`;
+  const sc = scoreOf(it.kind, an, it.key);
+  if (sc) paras.unshift(`초월 평론가 판정 ${sc.score.toFixed(1)}점 — ${verdictOf(sc.score)}${sc.ev?.why?.length ? ` (근거: ${sc.ev.why.join(' · ')})` : ''}`);
+  let h = `<div class="d-block"><h4>객관적 평론 · 초월 평론가 모델</h4><div class="review">${paras.map((p, i) => `<p${i ? '' : ' class="verdict"'}>${esc(p)}</p>`).join('')}</div>`;
   if (cr?.loading) h += '<p class="muted small">위키백과 평단 자료 확인 중…</p>';
   if (cr?.found) {
     if (cr.ratings?.length) h += `<div class="ratings">${cr.ratings.map((r) => `<div class="rating"><span>${esc(r.source)}${r.aggregate ? ' <em>종합</em>' : ''}</span><i style="--w:${Math.round(C(r.n / 100) * 100)}%"></i><b>${esc(r.text)}</b></div>`).join('')}</div>`;
@@ -475,7 +489,7 @@ function trackDetail(it) {
   let h = `<div class="row-gap" style="margin-bottom:16px">${it.preview || it.previewAlt ? `<button type="button" class="btn-secondary" data-act="play" data-key="${esc(key)}">▶ 미리듣기</button>` : ''}${chipsHtml(it.artist, it.altTitle || it.title, true)}</div>`;
   if (!an || S.pending.has(key)) return h + progressBlock(key);
   if (an.failed) return h + `<p class="muted">${esc(an.errors?.[0] || '분석 실패')}</p><button type="button" class="btn-secondary" data-act="reanalyze" data-key="${esc(key)}">다시 분석</button>`;
-  h += reviewBlock(it, an) + scoreBlock(key, an) + genreBlock(an) + creditBlock(an, false) + moodBlock(an, it);
+  h += reviewBlock(it, an) + scoreBlock(key, an) + genreBlock(an) + creditBlock(an, false) + moodBlock(an, it) + similarBlock(it, an);
   h += `<p class="foot">${an.errors?.length ? esc(an.errors.join(' · ')) + '<br>' : ''}분석 한계: 음원 전체가 아닌 30초 미리듣기로 측정했습니다. 템포·조성·느낌은 신호 처리 추정치이고, 멜로디의 매력·가사·혁신성은 기계가 판정할 수 없어 직접 채점 항목으로 남겼습니다. 데이터: Apple iTunes Search API, Deezer API, MusicBrainz(CC0).
     <br><button type="button" class="btn-ghost" style="margin-top:6px" data-act="reanalyze" data-key="${esc(key)}">다시 분석</button></p>`;
   return h;
@@ -495,7 +509,7 @@ function setDetail(it) {
   if (it.kind === 'artist') {
     const fl = S.albumFilter || 'all';
     const albums = (d.albums || []).filter((a) => fl === 'all' || (fl === 'single' ? a.recordType === 'single' : a.recordType !== 'single'));
-    h += `<div class="d-block"><div class="section-label" style="margin:0"><span>인기곡 TOP ${d.tracks.length} <span class="muted small" style="font-weight:500">Deezer 인기도 순 · 리믹스·라이브·변형 버전 제외${d.tracks.some((t) => t.unranked) ? ' · 순위 없는 곡은 Apple 목록으로 보충' : ''}</span></span>${d.tracks.length ? '<button type="button" class="btn-secondary" data-act="addTop5">+ 상위 5곡 담기</button>' : ''}</div>
+    h += `<div class="d-block"><div class="section-label" style="margin:0"><span>인기곡 TOP ${d.tracks.length} <span class="muted small" style="font-weight:500">${esc(d.rankBasis || 'Deezer 인기도')} 순 · 리믹스·라이브·변형 버전 제외${d.tracks.some((t) => t.unranked) ? ' · 순위 없는 곡은 Apple 목록으로 보충' : ''}</span></span>${d.tracks.length ? '<button type="button" class="btn-secondary" data-act="addTop5">+ 상위 5곡 담기</button>' : ''}</div>
       <div class="track-list">${d.tracks.map((t, i) => trackRow(t, i + 1)).join('') || `<p class="muted small">인기곡을 불러오지 못했습니다. <button type="button" class="btn-ghost" data-act="reloadDetail" data-key="${esc(key)}">다시 불러오기</button></p>`}</div></div>
       <div class="d-block"><div class="section-label" style="margin:0"><span>발매작 (${albums.length} · 최신순)</span>
         <span class="pill-group">${[['all', `전체 (${(d.albums || []).length})`], ['album', '정규·EP'], ['single', '싱글']].map(([k, l]) => `<button type="button" class="pill${fl === k ? ' active' : ''}" data-act="albumFilter" data-f="${k}">${l}</button>`).join('')}</span></div>
@@ -522,7 +536,7 @@ function setAnalysis(it, an) {
         return `<div class="axis"><span class="nm">${n}</span><input type="range" min="0" max="5" step="0.5" value="${v}" data-act="axis" data-key="${esc(key)}" data-axis="${k}" aria-label="${n} 점수"><span class="v">${(+v).toFixed(1)}</span><span class="src ${s[0]}">${s[1]}</span><span class="hint">${esc(hint)} — ${esc(E.ANCHORS[Math.round(v)])}</span></div>`; }).join('')}</div>`;
     h += fitBlock(key, an, sc.score);
   }
-  h += picksBlock(it, an);
+  h += picksBlock(it, an) + similarBlock(it, an);
   h += genreBlock(an);
   if (it.kind === 'album') h += creditBlock(an, true);
   if (an.mood && ok.length) {
@@ -551,6 +565,26 @@ function picksBlock(it, an) {
     <div class="section-label" style="margin:0">음악성이 가장 높은 곡 <span class="muted small" style="font-weight:500">근거 반영 측정 점수 · 분석한 ${ok.length}곡 중</span></div>
     <div class="track-list">${best.map((t, i) => row(t, `${i + 1}위 · ${t.score.toFixed(1)}점 · ${t.mood?.words?.[0] || ''} · ${Math.round(t.features.bpm)} BPM`)).join('')}</div>
     ${icon ? `<div class="section-label" style="margin:10px 0 0">대표곡(상징성) <span class="muted small" style="font-weight:500">${it.kind === 'album' && dedupeAlb(it.title).includes(E.dedupeKey(icon.title)) ? '앨범 타이틀곡' : 'Deezer 인기도 1위'} · 점수와 무관</span></div><div class="track-list">${row(icon, it.kind === 'album' && dedupeAlb(it.title).includes(E.dedupeKey(icon.title)) ? '앨범 이름과 같은 타이틀곡' : '가장 많이 들린 곡')}</div>` : ''}</div>`;
+}
+/* 유사 음악: 장르·분위기·4분면이 모두 맞는 것만 */
+function similarBlock(it, an) {
+  if (!an || an.failed || !(an.vec || an.vecMean) || !an.mood) return '';
+  const key = it.key; let st = S.sim.get(key);
+  if (!st) {
+    st = { loading: true, step: '후보 찾는 중' }; S.sim.set(key, st);
+    const artist = it.kind === 'artist' ? it.title : String(it.artist || '').split(/\s*(?:,|&|feat\.?)\s*/i)[0];
+    E.similarFor({ key, artist, deezerArtistId: it.kind === 'artist' ? it.deezerId : it.deezerArtistId, genres: an.genres, vec: an.vec || an.vecMean, mood: an.mood }, (m) => { st.step = m; if (curKey() === key) { const el = $('#simStep'); if (el) el.textContent = m; } })
+      .then((r) => { st.loading = false; st.res = r; }, () => { st.loading = false; st.res = null; }).finally(() => { if (curKey() === key) renderModal(); });
+  }
+  const head = `<div class="d-block"><h4>정말 비슷한 음악만 추천</h4><p class="muted small">통과 조건(모두): 장르 유사도 35 이상 · 측정 분위기 유사도 62 이상 · 취향 지도 같은 칸. 후보는 Deezer 연관 아티스트의 대표곡을 실제로 측정해 고릅니다.</p>`;
+  if (st.loading) return head + `<div class="progress-list"><div class="now" id="simStep">${esc(st.step)}</div></div></div>`;
+  const r = st.res;
+  if (!r || (!r.tracks.length && !r.artists.length)) return head + `<p class="muted small">장르·분위기가 충분히 비슷한 후보가 없어 추천하지 않습니다${r ? ` (검토: 아티스트 ${r.checked.artists}명 · 곡 ${r.checked.tracks}곡)` : ''}.</p></div>`;
+  let h = head;
+  if (it.kind !== 'artist' && r.tracks.length) h += `<div class="section-label" style="margin:0">유사한 곡</div><div class="track-list">${r.tracks.map((t) => { const k = reg({ ...t, srcs: ['deezer'] }); return `<div class="track-row"><img src="${esc(art(t))}" alt="" class="track-thumb" loading="lazy"><div class="track-meta" data-act="open" data-key="${esc(k)}"><div class="track-title">${esc(t.title)} <span class="badge badge-ok">유사 ${t.sim}</span></div><div class="track-sub">${esc(t.artist)} · ${esc(t.why)}</div></div><div class="track-actions">${t.preview ? `<button type="button" class="icon-btn" data-act="play" data-key="${esc(k)}" title="미리듣기">▶</button>` : ''}<button type="button" class="icon-btn${entry(k) ? ' added' : ''}" data-act="add" data-key="${esc(k)}" title="담기">${entry(k) ? '✓' : '+'}</button></div></div>`; }).join('')}</div>`;
+  if (it.kind === 'album' && r.albums.length) h += `<div class="section-label" style="margin:10px 0 0">유사한 앨범</div><div class="album-grid">${r.albums.map(albumCard).join('')}</div>`;
+  if (r.artists.length) h += `<div class="section-label" style="margin:10px 0 0">유사한 아티스트</div><div class="chips">${r.artists.map((a) => { const k = reg(a); return `<button type="button" class="chip" data-act="open" data-key="${esc(k)}">${esc(a.title)} <small class="muted">유사 ${a.sim}${a.genres?.length ? ' · ' + esc(a.genres.join('·')) : ''}</small></button>`; }).join('')}</div>`;
+  return h + `<p class="foot">검토: 아티스트 ${r.checked.artists}명 · 곡 ${r.checked.tracks}곡 중 조건을 통과한 것만 표시</p></div>`;
 }
 function drawModalQuad(key) {
   const box = $('#mQuad'); if (!box) return;

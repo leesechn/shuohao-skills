@@ -1152,6 +1152,18 @@ async function mbArtistInfo(name) {
   const names = [...new Set([c.name, ...(c.aliases || []).map((y) => y.name)].filter((n) => n && n.length < 40))];
   return { id: c.id, names, country: c.country || c.area?.name || '', begin: c['life-span']?.begin || '', type: c.type || '', disamb: c.disambiguation || '' };
 }
+/* Spotify 인기도(대한민국): 청음실 서버 연결부를 거쳐 조회(인증키는 서버에만). 설정 안 됐거나 실패하면 null */
+const API_BASE = /higgsfield\.app$/.test(location.hostname) ? '' : 'https://cheongeumsil.higgsfield.app';
+export function spotifyTop(names) {
+  return cached(`sp:${names.map(lite).join('|')}`, 30 * 6e4, async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/spotify?op=top&market=KR&names=${enc(names.slice(0, 5).join('|'))}`);
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j.configured && j.tracks?.length ? j : null;
+    } catch { return null; }
+  });
+}
 export function artistDetail(ar) { return cached(`ad:${lite(ar.title)}:${ar.deezerId || ''}`, 10 * 6e4, () => artistDetailRaw(ar)); }
 async function artistDetailRaw(ar) {
   const info = await mbArtistInfo(ar.title).catch(() => null);
@@ -1194,7 +1206,24 @@ async function artistDetailRaw(ar) {
       if (tmap.size >= 30) break;
     }
   }
-  const tracks = [...tmap.values()].slice(0, 30);
+  let tracks = [...tmap.values()].slice(0, 30);
+  let rankBasis = 'Deezer 인기도';
+  // Spotify 인기곡(최대 10곡, 대한민국 기준)이 있으면 1~10위는 Spotify 순서, 이후는 Deezer 인기도로 이어 붙임
+  const S = await spotifyTop([...new Set([ar.title, ...latin, ...names])]).catch(() => null);
+  if (S) {
+    const sp = [];
+    for (const t of S.tracks.filter((x) => !VERSION.test(x.title))) {
+      let it = null;
+      if (t.isrc) { const d = await deezer(`track/isrc:${enc(t.isrc)}`).catch(() => null); if (d?.id) it = fromDeezerTrack(d); }
+      if (!it) it = [...tmap.values()].find((x) => dedupeKey(x.title) === dedupeKey(t.title)) || { kind: 'track', title: t.title, artist: t.artist, album: t.album, year: t.year, artwork: t.artwork, durationMs: t.durationMs, srcs: ['spotify'] };
+      it = { ...it, title: t.title, spPop: t.popularity, spotifyUrl: t.spotifyUrl };
+      sp.push(it);
+    }
+    const seen = new Set(sp.map((x) => dedupeKey(x.title)));
+    tracks = [...sp, ...tracks.filter((x) => !seen.has(dedupeKey(x.title)))].slice(0, 30);
+    rankBasis = `Spotify 인기도(대한민국) 1~${sp.length}위 · 이후 Deezer 인기도`;
+    if (S.artist?.genres?.length) ar.spGenres = S.artist.genres;
+  }
   // 발매작: 컴필레이션·다른 가수 앨범 제외
   const amap = new Map();
   const ALB_BAD = /\b(remix(es)?|sped up|slowed|nightcore|karaoke|instrumentals?|inst\.)\b|리믹스/i;
@@ -1216,7 +1245,7 @@ async function artistDetailRaw(ar) {
     it.key = itemKey(it); amap.set(k, it);
   }
   const albums = [...amap.values()].sort((x, y) => String(y.date || y.year).localeCompare(String(x.date || x.year)));
-  return { tracks, albums, rankBasis: 'Deezer 인기도', info: info ? { country: info.country, begin: info.begin, type: info.type, names: names.filter((n) => n !== ar.title).slice(0, 4) } : null };
+  return { tracks, albums, rankBasis, spGenres: ar.spGenres || [], info: info ? { country: info.country, begin: info.begin, type: info.type, names: names.filter((n) => n !== ar.title).slice(0, 4) } : null };
 }
 
 /* ───────────── 평단 정보: 위키백과 평점 표(Music ratings)·평단 반응·개요 ─────────────
@@ -1500,7 +1529,7 @@ export function similarFor(seed, onStep = () => {}) {
     for (let i = 0; i < passArtists.length; i++) {
       const { a, g, gs } = passArtists[i];
       onStep(`분위기 측정 ${i + 1}/${passArtists.length}: ${a.title}`);
-      const top = (await artistTopTracks(a).catch(() => [])).filter((t) => t.preview && !VERSION.test(t.title) && !isUnofficial(t)).slice(0, 3);
+      const top = (await artistTopTracks(a).catch(() => [])).filter((t) => t.preview && !VERSION.test(t.title) && !isUnofficial(t) && !/\b(feat|with)\b/i.test(t.title)).slice(0, 3);
       const vs = [];
       for (const t of top) {
         checked.tracks++;
@@ -1519,7 +1548,11 @@ export function similarFor(seed, onStep = () => {}) {
         if (as >= 0.55 && sameQuad(seed.mood, mq)) artists.push({ ...a, sim: Math.round(100 * (0.5 * (gs ?? 0.5) + 0.5 * as)), genres: g.slice(0, 3).map((y) => y.ko || y.name) });
       }
     }
-    tracks.sort((x, y) => y.sim - x.sim); artists.sort((x, y) => y.sim - x.sim);
+    // 종합 유사도 65 이상만, 같은 곡의 피처링·버전은 하나로
+    const seenT = new Set();
+    const tk = tracks.filter((t) => t.sim >= 65).sort((x, y) => y.sim - x.sim).filter((t) => { const k = dedupeKey(t.title) + '|' + lite(primaryArtist(t.artist)); if (seenT.has(k)) return false; seenT.add(k); return true; });
+    tracks.length = 0; tracks.push(...tk);
+    const ak = artists.filter((a) => a.sim >= 65).sort((x, y) => y.sim - x.sim); artists.length = 0; artists.push(...ak);
     const albums = []; const seenAl = new Set();
     for (const t of tracks) if (t.album && t.deezerAlbumId && !seenAl.has(t.deezerAlbumId)) { seenAl.add(t.deezerAlbumId); albums.push({ kind: 'album', title: t.album, artist: t.artist, artwork: t.artwork, deezerId: t.deezerAlbumId, sim: t.sim, why: `수록곡 ‘${t.title}’ 기준` }); }
     return { tracks: tracks.slice(0, 6), artists: artists.slice(0, 5), albums: albums.slice(0, 4), checked };
